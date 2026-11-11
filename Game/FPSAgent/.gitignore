@@ -1,0 +1,9 @@
+# Unreal Engine generated
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+.vs/
+*.sln
+# Unreal-MCP local secrets — never commit
+.env
