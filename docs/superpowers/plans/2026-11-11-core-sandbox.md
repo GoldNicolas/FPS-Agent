@@ -83,6 +83,9 @@ public class FPSAgent : ModuleRules
 	public FPSAgent(ReadOnlyTargetRules Target) : base(Target)
 	{
 		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		// Includes are written relative to the module root, e.g. "Common/FPSAgentSettings.h".
+		// (UE 5.7 does not add the module directory by default; found during Task 2.)
+		PublicIncludePaths.Add(ModuleDirectory);
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core", "CoreUObject", "Engine", "InputCore",
 			"EnhancedInput", "AIModule", "DeveloperSettings" });
