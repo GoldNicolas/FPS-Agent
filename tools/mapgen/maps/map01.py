@@ -15,35 +15,11 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from mapgen.canvas import Canvas
 from mapgen.spec import MapSpec, save
 
 ROWS = COLS = 30
 OUT = Path(__file__).resolve().parents[3] / "Game/FPSAgent/Content/MapSpecs/map01.json"
-
-
-class Canvas:
-    def __init__(self, rows: int, cols: int):
-        self.t = [["#"] * cols for _ in range(rows)]
-        self.h = [["0"] * cols for _ in range(rows)]
-        self.z = [["."] * cols for _ in range(rows)]
-
-    def floor(self, r0, r1, c0, c1, level=0):
-        for r in range(r0, r1 + 1):
-            for c in range(c0, c1 + 1):
-                self.t[r][c], self.h[r][c] = ".", str(level)
-
-    def put(self, r, c, ch, level):
-        self.t[r][c], self.h[r][c] = ch, str(level)
-
-    def zone(self, r0, r1, c0, c1, z):
-        for r in range(r0, r1 + 1):
-            for c in range(c0, c1 + 1):
-                self.z[r][c] = z
-
-    def spec(self, name: str) -> MapSpec:
-        join = lambda g: ["".join(row) for row in g]
-        return MapSpec(name=name, tile_cm=400, level_cm=100, wall_cm=600,
-                       tiles=join(self.t), heights=join(self.h), zones=join(self.z))
 
 
 def build() -> MapSpec:
