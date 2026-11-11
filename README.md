@@ -354,6 +354,7 @@ Two Claude Code sessions (and you) work in parallel: **LOCAL** on Windows (game,
   ```
 - **Tuning:** Project Settings → Game → FPS Agent (saved to `Game/FPSAgent/Config/DefaultGame.ini`).
 - **Gotcha (UE 5.7):** `FVector`, `FVector2D` and `FRotator` hold doubles. Cast to `float` before `TestEqual(..., float, tolerance)`, or the call is ambiguous.
+- **Gotcha (spawning):** `SpawnActor` / `FinishSpawning` combine your transform with the class's default root transform. Directional lights default to about −46° pitch, which turned a −40° sun into −86°. Call `SetActorRotation` after spawning when the class has a non-identity default.
 
 ---
 

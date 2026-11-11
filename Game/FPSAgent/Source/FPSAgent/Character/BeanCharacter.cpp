@@ -29,6 +29,7 @@ namespace
 	void ConfigureVisual(UStaticMeshComponent* Mesh, UStaticMesh* Asset)
 	{
 		Mesh->SetStaticMesh(Asset);
+		Mesh->SetOwnerNoSee(true); // first-person camera sits inside the bean; others still see it
 		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
 		Mesh->SetGenerateOverlapEvents(false);
 		Mesh->SetCanEverAffectNavigation(false);

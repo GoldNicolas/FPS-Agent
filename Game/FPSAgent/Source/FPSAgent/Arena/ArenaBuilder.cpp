@@ -1,8 +1,11 @@
 #include "Arena/ArenaBuilder.h"
 #include "Common/FPSAgentSettings.h"
-#include "Components/LightComponent.h"
+#include "Components/DirectionalLightComponent.h"
+#include "Components/SkyAtmosphereComponent.h"
+#include "Components/SkyLightComponent.h"
 #include "Components/StaticMeshComponent.h"
 #include "Engine/DirectionalLight.h"
+#include "Engine/SkyLight.h"
 #include "Engine/StaticMesh.h"
 #include "Engine/StaticMeshActor.h"
 #include "Engine/World.h"
@@ -58,15 +61,25 @@ void SpawnPreviewLighting(UWorld* World)
 	{
 		return;
 	}
-	auto SpawnLight = [World](const FRotator& Rotation, float Intensity)
-	{
-		const FTransform Xf(Rotation, FVector::ZeroVector);
-		ADirectionalLight* Light = World->SpawnActorDeferred<ADirectionalLight>(ADirectionalLight::StaticClass(), Xf);
-		Light->GetLightComponent()->SetMobility(EComponentMobility::Movable);
-		Light->GetLightComponent()->SetIntensity(Intensity);
-		Light->FinishSpawning(Xf);
-	};
-	SpawnLight(FRotator(-50.f, -30.f, 0.f), 8.f); // key
-	SpawnLight(FRotator(-30.f, 150.f, 0.f), 3.f); // fill
+	// One sun shining from behind the player (+X) so the fronts of the bots are lit; it also drives the sky.
+	const FRotator SunRotation(-40.f, 15.f, 0.f); // light travels +X (away from the player), 40 deg above the horizon
+	ADirectionalLight* Sun = World->SpawnActorDeferred<ADirectionalLight>(ADirectionalLight::StaticClass(), FTransform::Identity);
+	UDirectionalLightComponent* SunLight = CastChecked<UDirectionalLightComponent>(Sun->GetLightComponent());
+	SunLight->SetMobility(EComponentMobility::Movable);
+	SunLight->SetIntensity(10.f);
+	SunLight->SetAtmosphereSunLight(true);
+	Sun->FinishSpawning(FTransform::Identity);
+	// Spawning composes the spawn transform with the class default root rotation (~-46 pitch for directional
+	// lights), so set the final rotation explicitly.
+	Sun->SetActorRotation(SunRotation);
+
+	// Blue sky + ambient fill from a real-time captured sky light.
+	World->SpawnActor<ASkyAtmosphere>(FVector::ZeroVector, FRotator::ZeroRotator);
+	ASkyLight* Sky = World->SpawnActorDeferred<ASkyLight>(ASkyLight::StaticClass(), FTransform::Identity);
+	USkyLightComponent* SkyLight = Sky->GetLightComponent();
+	SkyLight->SetMobility(EComponentMobility::Movable);
+	SkyLight->SourceType = SLS_CapturedScene;
+	SkyLight->bRealTimeCapture = true;
+	Sky->FinishSpawning(FTransform::Identity);
 }
 } // namespace FPSArena

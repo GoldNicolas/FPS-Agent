@@ -25,6 +25,6 @@ namespace FPSArena
 	/** Floor + four walls around the range whose player stands at Origin (floor top = Origin.Z). */
 	FPSAGENT_API FRangeLayout BuildRange(UWorld* World, const FRangeSettings& Range, const FVector& Origin);
 
-	/** Two movable directional lights for viewing; does nothing under -nullrhi. */
+	/** Sun + sky atmosphere + sky light for viewing; does nothing under -nullrhi. */
 	FPSAGENT_API void SpawnPreviewLighting(UWorld* World);
 }
