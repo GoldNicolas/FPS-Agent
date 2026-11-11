@@ -1,5 +1,6 @@
 #include "Arena/RangeGameMode.h"
 #include "Arena/BeanHUD.h"
+#include "Bots/RangeBot.h"
 #include "Character/BeanCharacter.h"
 #include "Character/BeanPlayerController.h"
 #include "Common/FPSAgentSettings.h"
@@ -32,4 +33,21 @@ void ARangeGameMode::InitGame(const FString& MapName, const FString& Options, FS
 AActor* ARangeGameMode::ChoosePlayerStart_Implementation(AController* Player)
 {
 	return PlayerStart ? PlayerStart.Get() : Super::ChoosePlayerStart_Implementation(Player);
+}
+
+void ARangeGameMode::StartPlay()
+{
+	Super::StartPlay();
+	const FRangeSettings& Range = UFPSAgentSettings::Get().Range;
+	const int32 BaseSeed = FFPSRunArgs::Get().Seed;
+	for (int32 i = 0; i < Layout.BotSpawns.Num() && i < Range.Lanes.Num(); ++i)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+		const FTransform& Spawn = Layout.BotSpawns[i];
+		if (ARangeBot* Bot = GetWorld()->SpawnActor<ARangeBot>(Spawn.GetLocation(), Spawn.Rotator(), Params))
+		{
+			Bot->InitBot(Range.Lanes[i].Mode, BaseSeed * 1000 + i);
+		}
+	}
 }

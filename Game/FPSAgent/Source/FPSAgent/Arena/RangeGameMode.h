@@ -17,6 +17,7 @@ public:
 	ARangeGameMode();
 	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
 	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+	virtual void StartPlay() override;
 
 protected:
 	FPSArena::FRangeLayout Layout;
