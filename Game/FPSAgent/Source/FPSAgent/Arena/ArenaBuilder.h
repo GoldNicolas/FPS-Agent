@@ -11,4 +11,20 @@ namespace FPSArena
 {
 	/** Axis-aligned gray box. Center and Size in cm. Blocks movement, visibility and the Weapon channel. */
 	FPSAGENT_API AStaticMeshActor* SpawnBlock(UWorld* World, const FVector& Center, const FVector& Size);
+
+	struct FRangeLayout
+	{
+		FTransform PlayerStart;
+		/** One per FRangeSettings::Lanes entry, same order. */
+		TArray<FTransform> BotSpawns;
+	};
+
+	/** Pure: player at Origin facing +X; lane bots in front, facing the player. SpawnHeightCm lifts capsules off the floor. */
+	FPSAGENT_API FRangeLayout ComputeRangeLayout(const FRangeSettings& Range, const FVector& Origin, float SpawnHeightCm);
+
+	/** Floor + four walls around the range whose player stands at Origin (floor top = Origin.Z). */
+	FPSAGENT_API FRangeLayout BuildRange(UWorld* World, const FRangeSettings& Range, const FVector& Origin);
+
+	/** Two movable directional lights for viewing; does nothing under -nullrhi. */
+	FPSAGENT_API void SpawnPreviewLighting(UWorld* World);
 }
