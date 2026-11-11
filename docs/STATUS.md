@@ -5,8 +5,8 @@ The mailbox between the **LOCAL** side (Windows: game, builds) and the **CLUSTER
 _Last updated: 2026-11-11 by LOCAL_
 
 ## Current focus
-- **LOCAL:** Step 2: first build and editor launch with Unreal-MCP connected. Then copy the Learning Agents Python files from UE 5.7.4, install the Linux target and the v26 toolchain, and build the Spike A toy game.
-- **CLUSTER:** Bootstrap (requests L-001, L-002 below).
+- **LOCAL:** Plan 1 (core sandbox) **done**: bean characters, rifle, health/armor, runtime-built range + static/strafe bots, 20/20 tests headless, verified in PIE via MCP. Next: Plan 2 (original blockout maps from JSON specs). Then the Linux target + v26 toolchain + Learning Agents Python copy for Spike A.
+- **CLUSTER:** Recon (L-001) and Spike E (L-003). Nothing to run from LOCAL yet: no Linux build has been published.
 
 ## Latest build
 None yet. Builds are listed in [`builds.md`](builds.md) and published as GitHub Releases tagged `build-<sha>`.
@@ -15,7 +15,7 @@ None yet. Builds are listed in [`builds.md`](builds.md) and published as GitHub 
 | ID | Date | Request | Status | Answer / link |
 |---|---|---|---|---|
 | L-001 | 2026-11-11 | Recon: run the commands in [`cradle.md`](cradle.md), fill in every `TBD`, and list which questions for the admins are still open | open | |
-| L-002 | 2026-11-11 | Bootstrap tools: Miniforge in `$HOME` (conda-forge only), install `gh`, run `gh auth login`, clone this repo to `~/fps-agent/repo`. Confirm that `gh release list` works | open | |
+| L-002 | 2026-11-11 | Bootstrap tools: Miniforge in `$HOME` (conda-forge only), install `gh`, run `gh auth login`, clone this repo to `~/fps-agent/repo`. Confirm that `gh release list` works | done | Not needed: the cluster already has GitHub access (user, 2026-11-11). Still confirm `gh release list` works before the first build lands. |
 | L-003 | 2026-11-11 | Spike E: write `cluster/env/la-train.yml` (Python 3.11, numpy, PyTorch CUDA build matching the driver, tensorboard), create the env, and check `torch.cuda.is_available()` in a GPU job. Report in `spikes/E-python-gpu.md` | open (after L-001) | |
 
 ## Requests: CLUSTER → LOCAL

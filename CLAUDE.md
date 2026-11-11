@@ -82,7 +82,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 - **The plugin is not in git** (decision D-010). On a fresh clone, reinstall it before opening the project (README → Windows dev setup).
 - Never switch to Cloud mode or sign in to ai-game.dev without the user's OK. Never commit `.env`.
 - Keep `"TargetDenyList": ["Game","Client","Server"]` on the UnrealMCP entry in `FPSAgent.uproject`. Never add `UnrealMcp*` modules to `FPSAgent.Build.cs`; that would override the deny list and pull the plugin into the Linux builds.
-- **C++:** edit files under `Source/`, then compile (Live Coding, UBT, or `unreal-mcp-cli compile`) and fix the reported errors before moving on.
+- **C++:** edit files under `Source/`, then build with `powershell -File tools/build.ps1` (editor closed) and fix the reported errors before moving on. Includes are relative to the module root (`"Common/FPSAgentSettings.h"`). In UE 5.7, `FVector`, `FVector2D` and `FRotator` are double: cast to float in `TestEqual` calls.
 - **Levels:** use the `tools/mapgen` builder through `python-execute`, never hand-placed actors.
   - The JSON spec in `maps/specs/` is the source of truth. To change a map, change the spec and rebuild.
   - `python-execute` has a 30 s default timeout, so build large maps in chunks.
@@ -115,6 +115,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 ## Testing and verification
 - **Weapon and movement math (LOCAL):** Unreal automation tests covering damage per hitbox, spread versus speed and the threshold, a deterministic recoil sequence for a given seed, fire-rate timing, and movement speeds under the fixed timestep.
 - **Map generator (LOCAL):** `pytest` in `tools/mapgen` covering spec schema, reachability, site count, spawn-zone line-of-sight separation and sightline histogram bands.
+- **Commands (LOCAL):** `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1` (editor closed; tests run with `-nullrhi`). For play-in-editor checks: `unreal-mcp-cli open Game/FPSAgent --headless --no-build`, then `unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StartPlay()"}'` / `AdvancePlay(seconds, 0, "W")`, then close with `unreal-mcp-cli close Game/FPSAgent --owned-only`. Only close editors the CLI started.
 - **Headless smoke test (CLUSTER):** before any long run on a new build, submit a short (about 5 min) Slurm debug job: 1–2 game processes with `-nullrhi` against the external trainer. They must connect, step, log and save a snapshot.
 - Don't call something done until it has been run. Report real output, including failures, in the docs.
 

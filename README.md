@@ -4,7 +4,7 @@ Train reinforcement-learning agents to move and shoot in a low-fidelity tactical
 
 The agents ("beans with guns") learn by trial and error (PPO) **only against scripted bots**. After training, a **deathmatch field test** pits the trained agents against each other on a full map to show how they perform. The long-term goal is to turn the trained policies into an in-game bot mechanic with tunable difficulty.
 
-> **Status (2026-11-11):** Design approved. The UE 5.7 C++ project is scaffolded at `Game/FPSAgent`, with Unreal-MCP 0.30.0 in local mode and VS 2022 Build Tools installed. Next: the first build and editor launch, then Phase 0 (quick feasibility tests, "spikes"; see [Roadmap](#roadmap)). **The live state of both sides is in [`docs/STATUS.md`](docs/STATUS.md).**
+> **Status (2026-11-11):** Core sandbox done (Plan 1, [`docs/superpowers/plans/2026-11-11-core-sandbox.md`](docs/superpowers/plans/2026-11-11-core-sandbox.md)): bean characters, Valorant-like movement, hitscan rifle (damage per hitbox, spread, recoil, cadence, reload), health + armor, and a runtime-built shooting range with static and strafing bots. 20 automation tests pass headless (`-nullrhi`), and it was verified in play-in-editor through Unreal-MCP. Next: Plan 2 (original blockout maps from JSON specs) and Phase 0 spikes. **The live state of both sides is in [`docs/STATUS.md`](docs/STATUS.md).**
 
 ---
 
@@ -220,8 +220,8 @@ This is also better for RL. Randomized original layouts keep the agent from memo
    - spawn zones are not in line of sight of each other,
    - the sightline-length histogram falls inside the target bands.
 3. **Procedural generator** produces randomized variant specs from templates (lane count, site shape, cover density).
-4. **In-editor builder**: Claude runs a builder script through Unreal-MCP's `python-execute` tool. The script reads a spec and spawns the level geometry, spawn zones and nav mesh bounds. Big maps are built in chunks because of the tool's default 30 s timeout.
-5. Levels are saved and checked into the repo, then cooked into the Linux build.
+4. **Runtime builder (C++).** `FPSArena` spawns level geometry from data when the game starts, in the editor and headless on Cradle alike, so procedural variants need no rebuild or `.umap` (decision D-011). The shooting range already works this way.
+5. **Unreal-MCP's role:** preview, play-test (`StartPlay` / `AdvancePlay`) and screenshot levels in the editor, and inspect actors with RQL.
 
 ---
 
@@ -327,7 +327,7 @@ Two Claude Code sessions (and you) work in parallel: **LOCAL** on Windows (game,
   - No ai-game.dev account is needed, and nothing leaves the machine.
 - **Claude Code config:** `.mcp.json` at the repo root (a copy lives in `Game/FPSAgent/`) points at `http://localhost:24268/mcp/p/d2699ae8`. Restart Claude Code after the editor is running, and approve the `unreal-mcp` server when prompted.
 - **Check the connection:** `unreal-mcp-cli status -p Game/FPSAgent`. It shows `reachable: yes` while the editor is open.
-- **Open the editor:** `unreal-mcp-cli open Game/FPSAgent`, which also builds when needed. To build without the editor: `unreal-mcp-cli compile -p Game/FPSAgent`.
+- **Open the editor:** `unreal-mcp-cli open Game/FPSAgent`, which also builds when needed. For automated checks, use `--headless` (windowless, CLI-owned) and close it with `unreal-mcp-cli close Game/FPSAgent --owned-only`. CLI 0.30.0 has no `compile` or `test` commands; use the scripts below.
 - **Update:** close the editor, then run `unreal-mcp-cli update Game/FPSAgent`.
 - **Fresh clone:** the plugin folder is not in git (about 580 MB of binaries), so reinstall it before opening the project:
   ```bash
@@ -335,6 +335,25 @@ Two Claude Code sessions (and you) work in parallel: **LOCAL** on Windows (game,
   unreal-mcp-cli configure -p Game/FPSAgent --mode Custom --start-server --transport http
   ```
   The repo-root `.mcp.json` is committed and doesn't need regenerating. If the port in `unreal-mcp-cli status` differs, re-run `unreal-mcp-cli setup-mcp claude-code -p Game/FPSAgent` and copy the file to the repo root.
+
+### Build and test (editor closed)
+- **Build:** `powershell -File tools/build.ps1`. It caps parallel compiles at 4 (`-Jobs`) because the default ran a 16 GB machine out of memory. The first build takes about 3–10 min; incremental builds take about 1 min.
+- **Tests (headless, `-nullrhi`):** `powershell -File tools/run_tests.ps1` prints each test. Exit 0 means all passed.
+- **Play-test:** open the editor and press Play.
+  - Controls: WASD move, mouse look, LMB fire, Shift walk, Ctrl crouch, Space jump, R reload.
+  - Console: `ShowHitboxes 1` draws hitboxes.
+  - The HUD shows HP, armor, ammo, speed and the current spread.
+- **Automated play-in-editor check via MCP:**
+  ```bash
+  unreal-mcp-cli open Game/FPSAgent --headless --no-build
+  unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StartPlay()"}'
+  unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call AdvancePlay(1.0, 0, \"W\")"}'
+  unreal-mcp-cli run-tool rql-query  -p Game/FPSAgent --input '{"query":"actors | where $ is RangeBot | select Label Location bHidden"}'
+  unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StopPlay()"}'
+  unreal-mcp-cli close Game/FPSAgent --owned-only
+  ```
+- **Tuning:** Project Settings → Game → FPS Agent (saved to `Game/FPSAgent/Config/DefaultGame.ini`).
+- **Gotcha (UE 5.7):** `FVector`, `FVector2D` and `FRotator` hold doubles. Cast to `float` before `TestEqual(..., float, tolerance)`, or the call is ambiguous.
 
 ---
 
