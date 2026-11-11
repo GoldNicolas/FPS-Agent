@@ -14,9 +14,12 @@ MAX_REPORTED = 5
 
 # Sightline distance bands (metres) and target fractions among visible pairs. Tunable: these encode
 # "mostly close/mid fights, a few long angles", not measurements of any existing game.
+# Calibration note (2026-11-11): pairs are sampled uniformly by tile, so geometry alone makes <10 m pairs
+# rare (~4% of the area within 50 m). On map01 adding cover moved "close" only 0.23 -> 0.25, so the close
+# floor is 0.20; the gameplay-relevant guards are the long cap (<=30%) and "some long angles" (>=3%).
 SIGHTLINE_SAMPLES = 4000
 MAX_SIGHT_M = 50.0
-BAND_TARGETS = {"close": (0.30, 1.00), "mid": (0.25, 1.00), "long": (0.03, 0.30)}
+BAND_TARGETS = {"close": (0.20, 1.00), "mid": (0.25, 1.00), "long": (0.03, 0.30)}
 
 
 def validate(spec: MapSpec, check_sightlines: bool = True) -> list[str]:
