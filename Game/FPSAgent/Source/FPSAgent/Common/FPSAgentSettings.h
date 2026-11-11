@@ -21,6 +21,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category="Mechanics") FRifleStats Rifle;
 	UPROPERTY(Config, EditAnywhere, Category="Mechanics") FHealthTuning Health;
 	UPROPERTY(Config, EditAnywhere, Category="Range") FRangeSettings Range;
+	UPROPERTY(Config, EditAnywhere, Category="Map") FMapPlaySettings Map;
 	/** Mouse look: degrees per mouse count. */
 	UPROPERTY(Config, EditAnywhere, Category="Input") float MouseDegreesPerCount = 0.05f;
 };

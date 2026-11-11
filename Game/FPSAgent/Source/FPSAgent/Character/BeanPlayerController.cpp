@@ -1,7 +1,10 @@
 #include "Character/BeanPlayerController.h"
+#include "Arena/ArenaGameMode.h"
+#include "Camera/CameraActor.h"
 #include "Character/BeanCharacter.h"
 #include "Common/FPSAgentSettings.h"
 #include "EngineUtils.h"
+#include "HAL/IConsoleManager.h"
 #include "EnhancedInputComponent.h"
 #include "EnhancedInputSubsystems.h"
 #include "Engine/LocalPlayer.h"
@@ -126,10 +129,76 @@ void ABeanPlayerController::OnWalkPressed()   { if (ABeanCharacter* B = GetBean(
 void ABeanPlayerController::OnWalkReleased()  { if (ABeanCharacter* B = GetBean()) { B->SetWalking(false); } }
 void ABeanPlayerController::OnReload()        { if (ABeanCharacter* B = GetBean()) { B->GetRifle()->RequestReload(); } }
 
+// Console variables (global: they also work from the editor console and Unreal-MCP's console tool,
+// which run against the editor world and never reach a PIE player controller's Exec functions).
+static TAutoConsoleVariable<int32> CVarTopDown(TEXT("fps.TopDown"), 0,
+	TEXT("1 = view the arena from above (north up); 0 = back to the bean."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarShowHitboxes(TEXT("fps.ShowHitboxes"), 0,
+	TEXT("1 = draw every bean's head/body/legs hitboxes."), ECVF_Default);
+
 void ABeanPlayerController::ShowHitboxes(bool bShow)
 {
+	CVarShowHitboxes->Set(bShow ? 1 : 0);
+}
+
+void ABeanPlayerController::TopDownView(bool bOn)
+{
+	CVarTopDown->Set(bOn ? 1 : 0);
+}
+
+void ABeanPlayerController::PlayerTick(float DeltaTime)
+{
+	Super::PlayerTick(DeltaTime);
+	const bool bWantTopDown = CVarTopDown.GetValueOnGameThread() != 0;
+	if (bWantTopDown != bTopDownActive)
+	{
+		ApplyTopDown(bWantTopDown);
+	}
+	const bool bWantHitboxes = CVarShowHitboxes.GetValueOnGameThread() != 0;
+	if (bWantHitboxes != bHitboxesShown)
+	{
+		ApplyHitboxes(bWantHitboxes);
+	}
+}
+
+void ABeanPlayerController::ApplyHitboxes(bool bShow)
+{
+	bHitboxesShown = bShow;
 	for (TActorIterator<ABeanCharacter> It(GetWorld()); It; ++It)
 	{
 		It->SetHitboxesVisible(bShow);
 	}
+}
+
+void ABeanPlayerController::ApplyTopDown(bool bOn)
+{
+	bTopDownActive = bOn;
+	if (!bOn)
+	{
+		if (APawn* MyPawn = GetPawn())
+		{
+			SetViewTargetWithBlend(MyPawn, 0.f);
+		}
+		return;
+	}
+	if (!TopDownCamera)
+	{
+		FBox Bounds(FVector(-2000.f), FVector(2000.f));
+		if (const AArenaGameMode* Arena = GetWorld()->GetAuthGameMode<AArenaGameMode>())
+		{
+			if (Arena->GetArenaBounds().IsValid)
+			{
+				Bounds = Arena->GetArenaBounds();
+			}
+		}
+		// Fit the whole arena in a 90-degree (horizontal) camera on a 16:9 view, north (+X) up.
+		const FVector Extent = Bounds.GetExtent();
+		const double HalfH = FMath::DegreesToRadians(45.0);
+		const double HalfV = FMath::Atan(FMath::Tan(HalfH) * 9.0 / 16.0);
+		const double Height = FMath::Max(Extent.X / FMath::Tan(HalfV), Extent.Y / FMath::Tan(HalfH)) * 1.08;
+		const FVector Location(Bounds.GetCenter().X, Bounds.GetCenter().Y, Bounds.Max.Z + Height);
+		TopDownCamera = GetWorld()->SpawnActor<ACameraActor>(Location, FRotator::ZeroRotator);
+		TopDownCamera->SetActorRotation(FRotator(-90.0, 0.0, 0.0)); // after spawn: spawning composes with class defaults
+	}
+	SetViewTargetWithBlend(TopDownCamera, 0.f);
 }

@@ -30,6 +30,8 @@ bool FFPSRunArgsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("default seed"), D.Seed, 0);
 	TestEqual(TEXT("default arenas"), D.Arenas, 1);
 	TestEqual(TEXT("arenas clamped"), FFPSRunArgs::Parse(TEXT("-Arenas=0")).Arenas, 1);
+	TestEqual(TEXT("map"), FFPSRunArgs::Parse(TEXT("-nullrhi -Map=map01 -Seed=3")).Map, FString(TEXT("map01")));
+	TestTrue(TEXT("map unset by default"), D.Map.IsEmpty());
 	return true;
 }
 

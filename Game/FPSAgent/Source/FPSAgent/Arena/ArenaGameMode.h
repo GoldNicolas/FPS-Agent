@@ -1,0 +1,46 @@
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/GameModeBase.h"
+#include "Arena/ArenaBuilder.h"
+#include "Arena/MapBuilder.h"
+#include "ArenaGameMode.generated.h"
+
+class APlayerStart;
+
+/**
+ * Builds the play space at runtime (works on the empty Entry map and headless): the shooting range or a map spec.
+ * Which one: -Map= command line > fps.PlayMap console variable > Project Settings > FPS Agent > Map > PlayMap.
+ */
+UCLASS()
+class FPSAGENT_API AArenaGameMode : public AGameModeBase
+{
+	GENERATED_BODY()
+
+public:
+	AArenaGameMode();
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+	virtual void StartPlay() override;
+
+	/** World-space bounds of the built arena (for the top-down camera). */
+	const FBox& GetArenaBounds() const { return Bounds; }
+	/** "range" or the spec name that was built. */
+	const FString& GetArenaName() const { return ArenaName; }
+
+	/** Resolves the requested arena name; "pool" picks a pool entry with Rng. Returns "range" for empty/"range". */
+	static FString ResolveArenaName(const FString& Requested, const TArray<FString>& PoolNames, FRandomStream& Rng);
+
+protected:
+	void BuildRangeArena(UWorld* World);
+	bool BuildMapArena(UWorld* World, const FString& SpecName);
+
+	FString ArenaName = TEXT("range");
+	FPSArena::FRangeLayout RangeLayout;
+	FMapLayout MapLayout;
+	FBox Bounds = FBox(ForceInit);
+	FRandomStream Rng;
+
+private:
+	UPROPERTY() TObjectPtr<APlayerStart> PlayerStart;
+};

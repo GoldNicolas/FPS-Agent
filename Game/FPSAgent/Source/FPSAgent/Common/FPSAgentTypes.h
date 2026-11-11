@@ -113,6 +113,17 @@ struct FRangeLane
 	UPROPERTY(EditAnywhere, Category="Range") ERangeBotMode Mode = ERangeBotMode::Static;
 };
 
+/** What the arena game mode builds. Precedence: -Map= command line > fps.PlayMap console variable > this setting. */
+USTRUCT(BlueprintType)
+struct FMapPlaySettings
+{
+	GENERATED_BODY()
+	/** "" or "range" = shooting range; "map01" / "gen_007" = that spec in Content/MapSpecs; "pool" = seeded random pool entry. */
+	UPROPERTY(EditAnywhere, Category="Map") FString PlayMap;
+	/** Range bots spawned on bot spots when playing a map. */
+	UPROPERTY(EditAnywhere, Category="Map") int32 BotCount = 6;
+};
+
 USTRUCT(BlueprintType)
 struct FRangeSettings
 {
