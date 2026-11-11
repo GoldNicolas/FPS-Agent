@@ -15,8 +15,13 @@ namespace FPSArena
 {
 AStaticMeshActor* SpawnBlock(UWorld* World, const FVector& Center, const FVector& Size)
 {
+	return SpawnBlockRotated(World, Center, Size, FRotator::ZeroRotator);
+}
+
+AStaticMeshActor* SpawnBlockRotated(UWorld* World, const FVector& Center, const FVector& Size, const FRotator& Rotation)
+{
 	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")); // 100 cm cube, centered pivot
-	const FTransform Xf(FRotator::ZeroRotator, Center, Size / 100.f);
+	const FTransform Xf(Rotation, Center, Size / 100.f); // StaticMeshActor's root has an identity default, so this is exact
 	AStaticMeshActor* Block = World->SpawnActorDeferred<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Xf, nullptr, nullptr,
 		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
 	UStaticMeshComponent* Mesh = Block->GetStaticMeshComponent();

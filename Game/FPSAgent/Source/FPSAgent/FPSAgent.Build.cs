@@ -9,6 +9,6 @@ public class FPSAgent : ModuleRules
 		PublicIncludePaths.Add(ModuleDirectory);
 		PublicDependencyModuleNames.AddRange(new string[] {
 			"Core", "CoreUObject", "Engine", "InputCore",
-			"EnhancedInput", "AIModule", "DeveloperSettings" });
+			"EnhancedInput", "AIModule", "DeveloperSettings", "Json" });
 	}
 }

@@ -12,6 +12,9 @@ namespace FPSArena
 	/** Axis-aligned gray box. Center and Size in cm. Blocks movement, visibility and the Weapon channel. */
 	FPSAGENT_API AStaticMeshActor* SpawnBlock(UWorld* World, const FVector& Center, const FVector& Size);
 
+	/** Gray box with a rotation (ramps). Size is in the box's local axes. */
+	FPSAGENT_API AStaticMeshActor* SpawnBlockRotated(UWorld* World, const FVector& Center, const FVector& Size, const FRotator& Rotation);
+
 	struct FRangeLayout
 	{
 		FTransform PlayerStart;
