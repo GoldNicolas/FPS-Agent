@@ -1,0 +1,2721 @@
+# Core Sandbox (Plan 1) Implementation Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** A playable, render-free, test-covered sandbox: bean characters with Valorant-like movement and a Vandal-like hitscan rifle, health and armor, and a runtime-built shooting range with static and strafing bots.
+
+**Architecture:**
+- All gunplay math is pure C++, with no actors or world, and is covered by Unreal automation tests.
+- Thin actor/component classes (`ABeanCharacter`, `URifleComponent`, `UHealthComponent`, `ARangeBot`) call that math.
+- Tuning lives in one `UDeveloperSettings` class (text config).
+- Level geometry is spawned at runtime from data (no `.umap`), so the same code works headless on Cradle and later supports per-episode procedural arenas.
+
+**Tech Stack:**
+- UE 5.7.4 C++ (Engine, EnhancedInput, AIModule, DeveloperSettings)
+- Unreal Automation tests, run headless through `UnrealEditor-Cmd.exe -nullrhi`
+- Unreal-MCP CLI (`run-tool rql-mutate`) for play-in-editor verification
+
+**Spec:** `README.md` (sections Game environment, RL design) and `CLAUDE.md` (hard rules).
+
+## Global Constraints
+- UE **5.7**. Project `Game/FPSAgent/FPSAgent.uproject`, module `FPSAgent`, export macro `FPSAGENT_API`.
+- C++ for all logic. No Blueprints and no new `.uasset`/`.umap` files in this plan.
+- Must work under `-nullrhi -nosound`:
+  - no skeletal meshes or bones for gameplay,
+  - hitboxes are primitive shape components,
+  - lights only when `FApp::CanEverRender()`.
+- Mechanics values live only in `UFPSAgentSettings` (Common/FPSAgentSettings.h), each with a source or "verify" note. Gameplay code never hard-codes them.
+- Names are generic: "rifle" and "range". No "Vandal", "Valorant" or map names in code or assets.
+- Units are cm, cm/s, degrees and seconds.
+- Hitscan channel `ECC_Weapon` = `ECC_GameTraceChannel1`, named "Weapon" in DefaultEngine.ini, default response **Block**.
+- Test names are prefixed `FPSAgent.`; tests compile only `#if WITH_DEV_AUTOMATION_TESTS`.
+- **Commits:** `[local] ...` prefix, ending with `Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>`. Run `git pull --rebase && git push` after each task. Never force-push.
+- **Before any build:** the editor must not be running. Close one the CLI started with `unreal-mcp-cli close Game/FPSAgent --owned-only`. Ask the user to close one they opened.
+
+## File structure (all under `Game/FPSAgent/` unless noted)
+
+| File | Responsibility |
+|---|---|
+| `Source/FPSAgent/FPSAgent.h/.cpp` | Module + `LogFPSAgent` log category |
+| `Source/FPSAgent/FPSAgent.Build.cs` | Module dependencies |
+| `Source/FPSAgent/Common/FPSAgentTypes.h` | `ECC_Weapon`, `EHitZone`, `ERangeBotMode`, tuning structs |
+| `Source/FPSAgent/Common/FPSAgentSettings.h/.cpp` | `UFPSAgentSettings` (all mechanics data) |
+| `Source/FPSAgent/Common/FPSRunArgs.h/.cpp` | `-Stage= -Seed= -Arenas=` parsing |
+| `Source/FPSAgent/Weapons/CombatMath.h/.cpp` | Pure damage, armor, spread, recoil, recovery, spread cone |
+| `Source/FPSAgent/Weapons/RifleFireState.h/.cpp` | Pure cadence, ammo and reload state machine |
+| `Source/FPSAgent/Weapons/RifleComponent.h/.cpp` | Hitscan firing on the owner's aim |
+| `Source/FPSAgent/Character/HealthComponent.h/.cpp` | Health + armor pool, damage and death events |
+| `Source/FPSAgent/Character/BeanHitboxLayout.h/.cpp` | Pure hitbox placement from capsule half-height |
+| `Source/FPSAgent/Character/BeanCharacter.h/.cpp` | The bean: capsule, hitboxes, visuals, camera, movement tuning |
+| `Source/FPSAgent/Character/BeanPlayerController.h/.cpp` | Enhanced Input built in code (no assets) |
+| `Source/FPSAgent/Arena/ArenaBuilder.h/.cpp` | Runtime blocks, range layout, preview lighting |
+| `Source/FPSAgent/Arena/RangeGameMode.h/.cpp` | Builds the range, player start, spawns bots |
+| `Source/FPSAgent/Arena/BeanHUD.h/.cpp` | Crosshair, HP/armor/ammo/spread, hit markers |
+| `Source/FPSAgent/Bots/StrafeLogic.h/.cpp` | Pure ADAD strafe decision |
+| `Source/FPSAgent/Bots/RangeBot.h/.cpp` | Static/strafe range bot with respawn |
+| `Source/FPSAgent/Tests/*.cpp` | Automation tests |
+| `Config/DefaultEngine.ini`, `Config/DefaultInput.ini` | Maps, game mode, Weapon channel, Enhanced Input |
+| repo `tools/build.ps1`, `tools/run_tests.ps1` | Build the editor target; run tests headless and summarize |
+
+---
+
+### Task 1: Build pipeline, headless test runner, first editor launch
+
+**Files:**
+- Modify: `Source/FPSAgent/FPSAgent.Build.cs`, `Source/FPSAgent/FPSAgent.h`, `Source/FPSAgent/FPSAgent.cpp`, `Config/DefaultEngine.ini`
+- Create: `tools/build.ps1`, `tools/run_tests.ps1` (repo root), `Source/FPSAgent/Tests/SanityTests.cpp`
+
+**Interfaces:**
+- Produces:
+  - `LogFPSAgent` (declared in `FPSAgent.h`)
+  - `tools/build.ps1`: exit 0 on success
+  - `tools/run_tests.ps1 [-Filter FPSAgent]`: exit 0 only if ≥ 1 test ran and none failed
+  - `ECC_GameTraceChannel1` named "Weapon"
+
+- [ ] **Step 1: Module deps, log category, engine config**
+
+`Source/FPSAgent/FPSAgent.Build.cs`:
+```csharp
+using UnrealBuildTool;
+
+public class FPSAgent : ModuleRules
+{
+	public FPSAgent(ReadOnlyTargetRules Target) : base(Target)
+	{
+		PCHUsage = PCHUsageMode.UseExplicitOrSharedPCHs;
+		PublicDependencyModuleNames.AddRange(new string[] {
+			"Core", "CoreUObject", "Engine", "InputCore",
+			"EnhancedInput", "AIModule", "DeveloperSettings" });
+	}
+}
+```
+`Source/FPSAgent/FPSAgent.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+
+DECLARE_LOG_CATEGORY_EXTERN(LogFPSAgent, Log, All);
+```
+`Source/FPSAgent/FPSAgent.cpp`:
+```cpp
+#include "FPSAgent.h"
+#include "Modules/ModuleManager.h"
+
+DEFINE_LOG_CATEGORY(LogFPSAgent);
+
+IMPLEMENT_PRIMARY_GAME_MODULE(FDefaultGameModuleImpl, FPSAgent, "FPSAgent");
+```
+`Config/DefaultEngine.ini` (replace the whole file):
+```ini
+[/Script/EngineSettings.GameMapsSettings]
+GameDefaultMap=/Engine/Maps/Entry.Entry
+EditorStartupMap=/Engine/Maps/Entry.Entry
+
+[/Script/Engine.RendererSettings]
+r.GenerateMeshDistanceFields=False
+
+[/Script/Engine.CollisionProfile]
++DefaultChannelResponses=(Channel=ECC_GameTraceChannel1,DefaultResponse=ECR_Block,bTraceType=True,bStaticObject=False,Name="Weapon")
+```
+
+- [ ] **Step 2: Build and test scripts**
+
+`tools/build.ps1`:
+```powershell
+# Builds the FPSAgentEditor target. The editor must NOT be running.
+param([string]$Config = "Development")
+$ErrorActionPreference = "Stop"
+$Engine  = if ($env:UE_ROOT) { $env:UE_ROOT } else { "C:\Program Files\Epic Games\UE_5.7" }
+$Project = (Resolve-Path (Join-Path $PSScriptRoot "..\Game\FPSAgent\FPSAgent.uproject")).Path
+& "$Engine\Engine\Build\BatchFiles\Build.bat" FPSAgentEditor Win64 $Config "-Project=$Project" -WaitMutex -NoHotReloadFromIDE
+exit $LASTEXITCODE
+```
+`tools/run_tests.ps1`:
+```powershell
+# Runs Unreal automation tests headless (-nullrhi) and prints a summary. Exit 0 = all passed.
+param([string]$Filter = "FPSAgent")
+$ErrorActionPreference = "Stop"
+$Engine  = if ($env:UE_ROOT) { $env:UE_ROOT } else { "C:\Program Files\Epic Games\UE_5.7" }
+$Project = (Resolve-Path (Join-Path $PSScriptRoot "..\Game\FPSAgent\FPSAgent.uproject")).Path
+$Report  = Join-Path (Split-Path $Project) "Saved\TestReport"
+if (Test-Path $Report) { Remove-Item -Recurse -Force $Report }
+& "$Engine\Engine\Binaries\Win64\UnrealEditor-Cmd.exe" $Project `
+    "-ExecCmds=Automation RunTests $Filter;Quit" "-TestExit=Automation Test Queue Empty" `
+    "-ReportExportPath=$Report" -unattended -nopause -nosplash -nullrhi -nosound "-log=FPSAgentTests.log" | Out-Null
+$Index = Join-Path $Report "index.json"
+if (-not (Test-Path $Index)) { Write-Host "No report. See Game/FPSAgent/Saved/Logs/FPSAgentTests.log"; exit 2 }
+$R = Get-Content $Index -Raw | ConvertFrom-Json
+foreach ($t in $R.tests) {
+    "{0,-8} {1}" -f $t.state, $t.fullTestPath
+    foreach ($e in $t.entries) { if ($e.event.type -eq "Error") { "         ! " + $e.event.message } }
+}
+"Succeeded: $($R.succeeded)  Failed: $($R.failed)  NotRun: $($R.notRun)"
+if ($R.failed -gt 0 -or $R.succeeded -eq 0) { exit 1 } else { exit 0 }
+```
+
+- [ ] **Step 3: Sanity test**
+
+`Source/FPSAgent/Tests/SanityTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSSanityTest, "FPSAgent.Sanity.Pipeline",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+
+bool FFPSSanityTest::RunTest(const FString& Parameters)
+{
+	TestEqual(TEXT("arithmetic still works"), 2 + 2, 4);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 4: Build.** The first build compiles the module and the UnrealMCP plugin, about 3–10 min.
+
+Run: `powershell -File tools/build.ps1`
+Expected: ends with `Result: Succeeded`, exit 0.
+
+- [ ] **Step 5: Run tests**
+
+Run: `powershell -File tools/run_tests.ps1`
+Expected: `Success  FPSAgent.Sanity.Pipeline` and `Succeeded: 1  Failed: 0`.
+
+If the summary format differs (index.json schema), read `Saved/TestReport/index.json`, adjust the property names in `run_tests.ps1`, and re-run.
+
+- [ ] **Step 6: Launch the editor with MCP and verify the connection**
+
+Run: `unreal-mcp-cli open Game/FPSAgent --headless`, then `unreal-mcp-cli status -p Game/FPSAgent`
+Expected: `MCP server: reachable: yes`.
+Then: `unreal-mcp-cli close Game/FPSAgent --owned-only`
+
+- [ ] **Step 7: Commit**
+```bash
+git add Game/FPSAgent/Source Game/FPSAgent/Config tools/build.ps1 tools/run_tests.ps1
+git commit -m "[local] Build + headless test pipeline, Weapon trace channel, Entry startup map" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 2: Mechanics settings and run arguments
+
+**Files:**
+- Create: `Source/FPSAgent/Common/FPSAgentTypes.h`, `Common/FPSAgentSettings.h/.cpp`, `Common/FPSRunArgs.h/.cpp`, `Tests/SettingsTests.cpp`
+
+**Interfaces:**
+- Produces:
+  - `ECC_Weapon`, `EHitZone {None, Head, Body, Legs}`, `ERangeBotMode {Static, Strafe}`
+  - Structs `FMovementTuning`, `FBeanBody`, `FRifleStats`, `FHealthTuning`, `FRangeLane`, `FRangeSettings` (fields below)
+  - `UFPSAgentSettings::Get()` → `const UFPSAgentSettings&`, with members `Movement`, `Body`, `Rifle`, `Health`, `Range`, `MouseDegreesPerCount`
+  - `FFPSRunArgs { FString Stage; int32 Seed; int32 Arenas; static FFPSRunArgs Parse(const TCHAR*); static const FFPSRunArgs& Get(); FString ToString() const; }`
+
+- [ ] **Step 1: Write the failing tests** in `Source/FPSAgent/Tests/SettingsTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Common/FPSAgentSettings.h"
+#include "Common/FPSRunArgs.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSSettingsDefaultsTest, "FPSAgent.Settings.Defaults",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSSettingsDefaultsTest::RunTest(const FString& Parameters)
+{
+	const UFPSAgentSettings& S = UFPSAgentSettings::Get();
+	TestTrue(TEXT("one headshot kills from full HP + armor"), S.Rifle.DamageHead >= S.Health.MaxHealth + S.Health.MaxArmor);
+	TestTrue(TEXT("fire rate positive"), S.Rifle.FireRate > 0.f);
+	TestTrue(TEXT("walk slower than run"), S.Movement.WalkSpeed < S.Movement.RunSpeed);
+	TestTrue(TEXT("crouch capsule smaller"), S.Body.CrouchedHalfHeight < S.Body.StandingHalfHeight);
+	TestTrue(TEXT("range has lanes"), S.Range.Lanes.Num() > 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRunArgsTest, "FPSAgent.Settings.RunArgs",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSRunArgsTest::RunTest(const FString& Parameters)
+{
+	const FFPSRunArgs A = FFPSRunArgs::Parse(TEXT("-nullrhi -Stage=S2 -Seed=42 -Arenas=16"));
+	TestEqual(TEXT("stage"), A.Stage, FString(TEXT("S2")));
+	TestEqual(TEXT("seed"), A.Seed, 42);
+	TestEqual(TEXT("arenas"), A.Arenas, 16);
+	const FFPSRunArgs D = FFPSRunArgs::Parse(TEXT("-nullrhi"));
+	TestEqual(TEXT("default stage"), D.Stage, FString(TEXT("S0")));
+	TestEqual(TEXT("default seed"), D.Seed, 0);
+	TestEqual(TEXT("default arenas"), D.Arenas, 1);
+	TestEqual(TEXT("arenas clamped"), FFPSRunArgs::Parse(TEXT("-Arenas=0")).Arenas, 1);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Run `powershell -File tools/build.ps1`. Expected: compile error, `Common/FPSAgentSettings.h` not found.
+
+- [ ] **Step 3: Implement.** `Source/FPSAgent/Common/FPSAgentTypes.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/EngineTypes.h"
+#include "FPSAgentTypes.generated.h"
+
+/** Hitscan trace channel: "Weapon" (ECC_GameTraceChannel1, default Block) in Config/DefaultEngine.ini. */
+inline constexpr ECollisionChannel ECC_Weapon = ECC_GameTraceChannel1;
+
+UENUM(BlueprintType)
+enum class EHitZone : uint8 { None, Head, Body, Legs };
+
+UENUM(BlueprintType)
+enum class ERangeBotMode : uint8 { Static, Strafe };
+
+/** Movement tuning (cm, cm/s). "verify" = community-sourced estimate, confirm by play-testing. */
+USTRUCT(BlueprintType)
+struct FMovementTuning
+{
+	GENERATED_BODY()
+	/** ~5.4 m/s with a rifle (community-sourced, verify). */
+	UPROPERTY(EditAnywhere, Category="Movement") float RunSpeed = 540.f;
+	/** Shift-walk speed, ~55% of run (verify). */
+	UPROPERTY(EditAnywhere, Category="Movement") float WalkSpeed = 300.f;
+	/** Crouch speed, ~35% of run (verify). */
+	UPROPERTY(EditAnywhere, Category="Movement") float CrouchSpeed = 190.f;
+	/** High accel/braking = snappy counter-strafe (tune by feel). */
+	UPROPERTY(EditAnywhere, Category="Movement") float MaxAcceleration = 4000.f;
+	UPROPERTY(EditAnywhere, Category="Movement") float BrakingDeceleration = 6000.f;
+	UPROPERTY(EditAnywhere, Category="Movement") float GroundFriction = 8.f;
+	/** Jump launch speed (verify jump height). */
+	UPROPERTY(EditAnywhere, Category="Movement") float JumpZVelocity = 420.f;
+	UPROPERTY(EditAnywhere, Category="Movement") float AirControl = 0.3f;
+	/** Fully accurate at or below this fraction of RunSpeed: 27.5% (secondary source, verify). */
+	UPROPERTY(EditAnywhere, Category="Movement") float AccurateSpeedFraction = 0.275f;
+};
+
+/** Bean geometry (cm). Hitboxes derive from it via ComputeBeanHitboxLayout. */
+USTRUCT(BlueprintType)
+struct FBeanBody
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, Category="Body") float CapsuleRadius = 34.f;
+	/** 1.76 m tall standing. */
+	UPROPERTY(EditAnywhere, Category="Body") float StandingHalfHeight = 88.f;
+	UPROPERTY(EditAnywhere, Category="Body") float CrouchedHalfHeight = 60.f;
+	UPROPERTY(EditAnywhere, Category="Body") float HeadRadius = 12.f;
+	UPROPERTY(EditAnywhere, Category="Body") float HeadTopClearance = 6.f;
+	/** Fraction of total height covered by the legs hitbox. */
+	UPROPERTY(EditAnywhere, Category="Body") float LegFraction = 0.386f;
+	UPROPERTY(EditAnywhere, Category="Body") float BodyHalfDepth = 18.f;
+	UPROPERTY(EditAnywhere, Category="Body") float BodyHalfWidth = 26.f;
+	UPROPERTY(EditAnywhere, Category="Body") float LegsHalfDepth = 16.f;
+	UPROPERTY(EditAnywhere, Category="Body") float LegsHalfWidth = 20.f;
+};
+
+/** Automatic rifle with Vandal-like stats (generic name). Degrees / seconds / cm. */
+USTRUCT(BlueprintType)
+struct FRifleStats
+{
+	GENERATED_BODY()
+	/** 160 / 40 / 34, no falloff (2025-26 guides, verify). */
+	UPROPERTY(EditAnywhere, Category="Damage") float DamageHead = 160.f;
+	UPROPERTY(EditAnywhere, Category="Damage") float DamageBody = 40.f;
+	UPROPERTY(EditAnywhere, Category="Damage") float DamageLegs = 34.f;
+	UPROPERTY(EditAnywhere, Category="Damage") float MaxRangeCm = 10000.f;
+	/** Rounds per second (guides, verify). */
+	UPROPERTY(EditAnywhere, Category="Handling") float FireRate = 9.75f;
+	UPROPERTY(EditAnywhere, Category="Handling") int32 MagazineSize = 25;
+	/** Seconds (verify). */
+	UPROPERTY(EditAnywhere, Category="Handling") float ReloadTime = 2.5f;
+	/** Standing-still first-shot spread, cone half-angle (guide, verify). */
+	UPROPERTY(EditAnywhere, Category="Spread") float FirstShotSpreadDeg = 0.25f;
+	/** Spread just above the accurate-speed threshold (tune). */
+	UPROPERTY(EditAnywhere, Category="Spread") float WalkSpreadDeg = 2.5f;
+	/** Spread at full run speed (tune). */
+	UPROPERTY(EditAnywhere, Category="Spread") float RunSpreadDeg = 5.f;
+	UPROPERTY(EditAnywhere, Category="Spread") float AirSpreadDeg = 8.f;
+	UPROPERTY(EditAnywhere, Category="Spread") float CrouchSpreadMultiplier = 0.85f;
+	/** Shots 0..AccurateShots-1 get no spray bloom. */
+	UPROPERTY(EditAnywhere, Category="Spread") int32 AccurateShots = 3;
+	UPROPERTY(EditAnywhere, Category="Spread") float SprayBloomPerShotDeg = 0.35f;
+	UPROPERTY(EditAnywhere, Category="Spread") float SprayBloomMaxDeg = 3.f;
+	/** Our own recoil pattern: small kick, then vertical climb to a cap, then horizontal sway. */
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilKickFirstShotsDeg = 0.15f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilClimbPerShotDeg = 0.6f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilClimbMaxDeg = 6.f;
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoilSwayAmplitudeDeg = 1.5f;
+	UPROPERTY(EditAnywhere, Category="Recoil") int32 RecoilSwayPeriodShots = 6;
+	/** Idle seconds that recover one step of the spray index (verify feel). */
+	UPROPERTY(EditAnywhere, Category="Recoil") float RecoveryTimePerShot = 0.04f;
+};
+
+USTRUCT(BlueprintType)
+struct FHealthTuning
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, Category="Health") float MaxHealth = 100.f;
+	/** Heavy-shield equivalent (verify). */
+	UPROPERTY(EditAnywhere, Category="Health") float MaxArmor = 50.f;
+	/** Fraction of each hit taken by armor while armor remains (verify: 1.0 = armor absorbs everything first). */
+	UPROPERTY(EditAnywhere, Category="Health") float ArmorAbsorbFraction = 1.f;
+};
+
+USTRUCT(BlueprintType)
+struct FRangeLane
+{
+	GENERATED_BODY()
+	/** Distance in front of the player (+X). */
+	UPROPERTY(EditAnywhere, Category="Range") float DistanceCm = 1000.f;
+	/** Sideways offset (+Y = right of the player). */
+	UPROPERTY(EditAnywhere, Category="Range") float LateralCm = 0.f;
+	UPROPERTY(EditAnywhere, Category="Range") ERangeBotMode Mode = ERangeBotMode::Static;
+};
+
+USTRUCT(BlueprintType)
+struct FRangeSettings
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, Category="Range") TArray<FRangeLane> Lanes;
+	UPROPERTY(EditAnywhere, Category="Range") float StrafeHalfWidthCm = 300.f;
+	UPROPERTY(EditAnywhere, Category="Range") float StrafeMinPeriod = 0.35f;
+	UPROPERTY(EditAnywhere, Category="Range") float StrafeMaxPeriod = 1.1f;
+	UPROPERTY(EditAnywhere, Category="Range") float BotRespawnDelay = 1.5f;
+	UPROPERTY(EditAnywhere, Category="Range") float ArenaLengthCm = 6000.f;
+	UPROPERTY(EditAnywhere, Category="Range") float ArenaWidthCm = 3000.f;
+	UPROPERTY(EditAnywhere, Category="Range") float WallHeightCm = 400.f;
+	UPROPERTY(EditAnywhere, Category="Range") float WallThicknessCm = 50.f;
+};
+```
+`Source/FPSAgent/Common/FPSAgentSettings.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Engine/DeveloperSettings.h"
+#include "Common/FPSAgentTypes.h"
+#include "FPSAgentSettings.generated.h"
+
+/** Every tunable mechanic. Project Settings > Game > FPS Agent (saved to Config/DefaultGame.ini). */
+UCLASS(Config=Game, DefaultConfig, meta=(DisplayName="FPS Agent"))
+class FPSAGENT_API UFPSAgentSettings : public UDeveloperSettings
+{
+	GENERATED_BODY()
+
+public:
+	UFPSAgentSettings();
+
+	static const UFPSAgentSettings& Get() { return *GetDefault<UFPSAgentSettings>(); }
+
+	UPROPERTY(Config, EditAnywhere, Category="Mechanics") FMovementTuning Movement;
+	UPROPERTY(Config, EditAnywhere, Category="Mechanics") FBeanBody Body;
+	UPROPERTY(Config, EditAnywhere, Category="Mechanics") FRifleStats Rifle;
+	UPROPERTY(Config, EditAnywhere, Category="Mechanics") FHealthTuning Health;
+	UPROPERTY(Config, EditAnywhere, Category="Range") FRangeSettings Range;
+	/** Mouse look: degrees per mouse count. */
+	UPROPERTY(Config, EditAnywhere, Category="Input") float MouseDegreesPerCount = 0.05f;
+};
+```
+`Source/FPSAgent/Common/FPSAgentSettings.cpp`:
+```cpp
+#include "Common/FPSAgentSettings.h"
+
+UFPSAgentSettings::UFPSAgentSettings()
+{
+	CategoryName = TEXT("Game");
+
+	auto Lane = [](float Distance, float Lateral, ERangeBotMode Mode)
+	{
+		FRangeLane L;
+		L.DistanceCm = Distance;
+		L.LateralCm = Lateral;
+		L.Mode = Mode;
+		return L;
+	};
+	Range.Lanes = {
+		Lane(1000.f,    0.f, ERangeBotMode::Static),
+		Lane(1500.f, -500.f, ERangeBotMode::Strafe),
+		Lane(2000.f,  500.f, ERangeBotMode::Static),
+		Lane(3000.f,    0.f, ERangeBotMode::Strafe),
+		Lane(4500.f, -500.f, ERangeBotMode::Static),
+	};
+}
+```
+`Source/FPSAgent/Common/FPSRunArgs.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+
+/** Our command-line arguments (documented in README -> Cluster). Parsed once; logged at startup. */
+struct FPSAGENT_API FFPSRunArgs
+{
+	FString Stage = TEXT("S0");
+	int32 Seed = 0;
+	int32 Arenas = 1;
+
+	static FFPSRunArgs Parse(const TCHAR* CommandLine);
+	/** Parsed from FCommandLine::Get() on first use. */
+	static const FFPSRunArgs& Get();
+	FString ToString() const;
+};
+```
+`Source/FPSAgent/Common/FPSRunArgs.cpp`:
+```cpp
+#include "Common/FPSRunArgs.h"
+#include "Misc/CommandLine.h"
+#include "Misc/Parse.h"
+
+FFPSRunArgs FFPSRunArgs::Parse(const TCHAR* CommandLine)
+{
+	FFPSRunArgs Args;
+	FParse::Value(CommandLine, TEXT("Stage="), Args.Stage);
+	FParse::Value(CommandLine, TEXT("Seed="), Args.Seed);
+	FParse::Value(CommandLine, TEXT("Arenas="), Args.Arenas);
+	Args.Arenas = FMath::Max(1, Args.Arenas);
+	return Args;
+}
+
+const FFPSRunArgs& FFPSRunArgs::Get()
+{
+	static const FFPSRunArgs Args = Parse(FCommandLine::Get());
+	return Args;
+}
+
+FString FFPSRunArgs::ToString() const
+{
+	return FString::Printf(TEXT("Stage=%s Seed=%d Arenas=%d"), *Stage, Seed, Arenas);
+}
+```
+
+- [ ] **Step 4: Build and test.** Run `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1`. Expected: 3 tests succeed (Sanity, Settings.Defaults, Settings.RunArgs).
+
+- [ ] **Step 5: Commit**
+```bash
+git add Game/FPSAgent/Source
+git commit -m "[local] Mechanics settings (movement, body, rifle, health, range) and run args" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 3: Damage and armor math
+
+**Files:**
+- Create: `Source/FPSAgent/Weapons/CombatMath.h/.cpp`, `Tests/CombatMathTests.cpp`
+
+**Interfaces:**
+- Consumes: `FRifleStats`, `FMovementTuning`, `EHitZone`
+- Produces (namespace `FPSCombat`):
+  - `struct FDamageResult { float Health, Armor, DamageToHealth, DamageToArmor; bool bKilled; }`
+  - `float DamageForZone(const FRifleStats&, EHitZone)`
+  - `FDamageResult ApplyDamage(float Health, float Armor, float Damage, float ArmorAbsorbFraction)`
+  - Declared here, implemented in Task 4: `SpreadDegrees`, `RecoilOffsetDegrees`, `RecoverShotIndex`, `ApplySpreadCone`
+
+- [ ] **Step 1: Write the failing tests** in `Source/FPSAgent/Tests/CombatMathTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Common/FPSAgentSettings.h"
+#include "Weapons/CombatMath.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSDamageForZoneTest, "FPSAgent.Combat.DamageForZone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSDamageForZoneTest::RunTest(const FString& Parameters)
+{
+	const FRifleStats R;
+	TestEqual(TEXT("head"), FPSCombat::DamageForZone(R, EHitZone::Head), 160.f);
+	TestEqual(TEXT("body"), FPSCombat::DamageForZone(R, EHitZone::Body), 40.f);
+	TestEqual(TEXT("legs"), FPSCombat::DamageForZone(R, EHitZone::Legs), 34.f);
+	TestEqual(TEXT("none"), FPSCombat::DamageForZone(R, EHitZone::None), 0.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSApplyDamageTest, "FPSAgent.Combat.ApplyDamage",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSApplyDamageTest::RunTest(const FString& Parameters)
+{
+	using namespace FPSCombat;
+	FDamageResult H = ApplyDamage(100.f, 50.f, 160.f, 1.f);
+	TestEqual(TEXT("headshot strips armor"), H.Armor, 0.f);
+	TestEqual(TEXT("headshot kills"), H.Health, 0.f);
+	TestTrue(TEXT("headshot bKilled"), H.bKilled);
+
+	FDamageResult B = ApplyDamage(100.f, 50.f, 40.f, 1.f);
+	TestEqual(TEXT("body hits armor first"), B.Armor, 10.f);
+	TestEqual(TEXT("health untouched"), B.Health, 100.f);
+	TestFalse(TEXT("alive"), B.bKilled);
+
+	FDamageResult NoArmor = ApplyDamage(100.f, 0.f, 40.f, 1.f);
+	TestEqual(TEXT("no armor -> health"), NoArmor.Health, 60.f);
+
+	FDamageResult Partial = ApplyDamage(100.f, 50.f, 40.f, 0.66f);
+	TestEqual(TEXT("partial absorb armor"), Partial.Armor, 50.f - 26.4f, 0.001f);
+	TestEqual(TEXT("partial absorb health"), Partial.Health, 100.f - 13.6f, 0.001f);
+
+	FDamageResult Dead = ApplyDamage(0.f, 0.f, 40.f, 1.f);
+	TestFalse(TEXT("dead target not killed again"), Dead.bKilled);
+	TestEqual(TEXT("dead target no damage"), Dead.DamageToHealth, 0.f);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Run `powershell -File tools/build.ps1`. Expected: compile error, `Weapons/CombatMath.h` not found.
+
+- [ ] **Step 3: Implement.** `Source/FPSAgent/Weapons/CombatMath.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Common/FPSAgentTypes.h"
+
+/** Pure gunplay math: no actors, no world. Covered by FPSAgent.Combat.* tests. */
+namespace FPSCombat
+{
+	struct FDamageResult
+	{
+		float Health = 0.f;
+		float Armor = 0.f;
+		float DamageToHealth = 0.f;
+		float DamageToArmor = 0.f;
+		bool bKilled = false;
+	};
+
+	FPSAGENT_API float DamageForZone(const FRifleStats& Rifle, EHitZone Zone);
+
+	/** Armor takes Damage*ArmorAbsorbFraction (up to what is left); the rest hits health. No-op on a dead target. */
+	FPSAGENT_API FDamageResult ApplyDamage(float Health, float Armor, float Damage, float ArmorAbsorbFraction);
+
+	/** Cone half-angle (deg) for the shot with the given spray index. */
+	FPSAGENT_API float SpreadDegrees(const FRifleStats& Rifle, const FMovementTuning& Move, float HorizontalSpeed, bool bAirborne, bool bCrouched, int32 ShotIndex);
+
+	/** Deterministic recoil for a spray index. X = yaw (deg, + right), Y = pitch (deg, + up). */
+	FPSAGENT_API FVector2D RecoilOffsetDegrees(const FRifleStats& Rifle, int32 ShotIndex);
+
+	/** Spray index after IdleSeconds without shooting (beyond the normal fire interval). */
+	FPSAGENT_API int32 RecoverShotIndex(int32 ShotIndex, double IdleSeconds, float RecoveryTimePerShot);
+
+	/** Random direction inside a cone of SpreadDegrees around Direction (unit vector). */
+	FPSAGENT_API FVector ApplySpreadCone(const FVector& Direction, float SpreadDegrees, const FRandomStream& Rng);
+}
+```
+`Source/FPSAgent/Weapons/CombatMath.cpp` (Task 4 adds the other functions):
+```cpp
+#include "Weapons/CombatMath.h"
+
+namespace FPSCombat
+{
+float DamageForZone(const FRifleStats& Rifle, EHitZone Zone)
+{
+	switch (Zone)
+	{
+	case EHitZone::Head: return Rifle.DamageHead;
+	case EHitZone::Body: return Rifle.DamageBody;
+	case EHitZone::Legs: return Rifle.DamageLegs;
+	default:             return 0.f;
+	}
+}
+
+FDamageResult ApplyDamage(float Health, float Armor, float Damage, float ArmorAbsorbFraction)
+{
+	FDamageResult R;
+	R.Health = Health;
+	R.Armor = Armor;
+	if (Health <= 0.f || Damage <= 0.f)
+	{
+		return R;
+	}
+	const float Absorb = FMath::Clamp(ArmorAbsorbFraction, 0.f, 1.f);
+	R.DamageToArmor = FMath::Min(FMath::Max(Armor, 0.f), Damage * Absorb);
+	R.DamageToHealth = Damage - R.DamageToArmor;
+	R.Armor = Armor - R.DamageToArmor;
+	R.Health = FMath::Max(0.f, Health - R.DamageToHealth);
+	R.bKilled = R.Health <= 0.f;
+	return R;
+}
+} // namespace FPSCombat
+```
+The header declares four functions that Task 4 implements. Nothing calls them yet, so the module still links.
+
+- [ ] **Step 4: Build and test.** Run `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1`. Expected: 5 succeeded, 0 failed.
+
+- [ ] **Step 5: Commit**
+```bash
+git add Game/FPSAgent/Source
+git commit -m "[local] Damage-per-zone and armor math with tests" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 4: Spread, recoil, recovery and the fire-cadence state machine
+
+**Files:**
+- Modify: `Source/FPSAgent/Weapons/CombatMath.cpp` (append the four functions)
+- Create: `Source/FPSAgent/Weapons/RifleFireState.h/.cpp`, `Tests/SpreadRecoilTests.cpp`, `Tests/RifleFireStateTests.cpp`
+
+**Interfaces:**
+- Consumes: Task 3 declarations
+- Produces: `struct FRifleFireState { int32 Ammo; int32 ShotIndex; double NextShotTime; double LastShotTime; double ReloadEndTime; bool bWasTriggerHeld; void Reset(const FRifleStats&); bool IsReloading() const; bool StartReload(const FRifleStats&, double Now); int32 Update(const FRifleStats&, double Now, bool bTriggerHeld, TArray<int32>& OutShotIndices); }`
+
+- [ ] **Step 1: Write the failing tests.** `Source/FPSAgent/Tests/SpreadRecoilTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Weapons/CombatMath.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSSpreadTest, "FPSAgent.Combat.Spread",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSSpreadTest::RunTest(const FString& Parameters)
+{
+	using namespace FPSCombat;
+	const FRifleStats R;
+	const FMovementTuning M;
+	const float Threshold = M.AccurateSpeedFraction * M.RunSpeed; // 148.5
+	TestEqual(TEXT("standing first shot"), SpreadDegrees(R, M, 0.f, false, false, 0), 0.25f, 1e-4f);
+	TestEqual(TEXT("at threshold still accurate"), SpreadDegrees(R, M, Threshold, false, false, 0), 0.25f, 1e-4f);
+	TestEqual(TEXT("just above threshold = walk spread"), SpreadDegrees(R, M, Threshold + 0.01f, false, false, 0), 2.5f, 1e-3f);
+	TestEqual(TEXT("full run"), SpreadDegrees(R, M, M.RunSpeed, false, false, 0), 5.f, 1e-4f);
+	TestEqual(TEXT("airborne"), SpreadDegrees(R, M, 0.f, true, false, 0), 8.f, 1e-4f);
+	TestEqual(TEXT("crouched standing"), SpreadDegrees(R, M, 0.f, false, true, 0), 0.25f * 0.85f, 1e-4f);
+	TestEqual(TEXT("shot 2 no bloom"), SpreadDegrees(R, M, 0.f, false, false, 2), 0.25f, 1e-4f);
+	TestEqual(TEXT("shot 3 first bloom"), SpreadDegrees(R, M, 0.f, false, false, 3), 0.25f + 0.35f, 1e-4f);
+	TestEqual(TEXT("bloom capped"), SpreadDegrees(R, M, 0.f, false, false, 100), 0.25f + 3.f, 1e-4f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRecoilTest, "FPSAgent.Combat.Recoil",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSRecoilTest::RunTest(const FString& Parameters)
+{
+	using namespace FPSCombat;
+	const FRifleStats R;
+	TestEqual(TEXT("first shot no recoil"), RecoilOffsetDegrees(R, 0).Y, 0.f, 1e-4f);
+	TestEqual(TEXT("shot 1 kick"), RecoilOffsetDegrees(R, 1).Y, 0.15f, 1e-4f);
+	TestEqual(TEXT("shot 2 kick"), RecoilOffsetDegrees(R, 2).Y, 0.30f, 1e-4f);
+	TestEqual(TEXT("shot 3 climbs"), RecoilOffsetDegrees(R, 3).Y, 0.90f, 1e-4f);
+	TestEqual(TEXT("shot 12 capped"), RecoilOffsetDegrees(R, 12).Y, 6.f, 1e-4f);
+	TestEqual(TEXT("shot 30 capped"), RecoilOffsetDegrees(R, 30).Y, 6.f, 1e-4f);
+	float Prev = -1.f;
+	for (int32 i = 0; i <= 40; ++i)
+	{
+		const FVector2D O = RecoilOffsetDegrees(R, i);
+		TestTrue(*FString::Printf(TEXT("pitch non-decreasing at %d"), i), O.Y >= Prev - 1e-4f);
+		TestTrue(*FString::Printf(TEXT("yaw bounded at %d"), i), FMath::Abs(O.X) <= R.RecoilSwayAmplitudeDeg + 1e-4f);
+		if (i <= 12) { TestEqual(*FString::Printf(TEXT("no sway before cap at %d"), i), O.X, 0.f, 1e-4f); }
+		Prev = O.Y;
+	}
+	TestEqual(TEXT("sway starts after cap"), RecoilOffsetDegrees(R, 13).X, 1.5f * FMath::Sin(2.f * UE_PI / 6.f), 1e-3f);
+	TestEqual(TEXT("same index same recoil"), RecoilOffsetDegrees(R, 17).X, RecoilOffsetDegrees(R, 17).X);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRecoveryTest, "FPSAgent.Combat.Recovery",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSRecoveryTest::RunTest(const FString& Parameters)
+{
+	using namespace FPSCombat;
+	TestEqual(TEXT("no idle keeps index"), RecoverShotIndex(8, 0.0, 0.04f), 8);
+	TestEqual(TEXT("small idle keeps index"), RecoverShotIndex(8, 0.03, 0.04f), 8);
+	TestEqual(TEXT("idle recovers steps"), RecoverShotIndex(8, 0.13, 0.04f), 5);
+	TestEqual(TEXT("long idle resets"), RecoverShotIndex(8, 10.0, 0.04f), 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSSpreadConeTest, "FPSAgent.Combat.SpreadCone",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSSpreadConeTest::RunTest(const FString& Parameters)
+{
+	using namespace FPSCombat;
+	const FRandomStream RngA(1234);
+	const FRandomStream RngB(1234);
+	const FVector Forward(1.f, 0.f, 0.f);
+	for (int32 i = 0; i < 200; ++i)
+	{
+		const FVector A = ApplySpreadCone(Forward, 2.f, RngA);
+		const FVector B = ApplySpreadCone(Forward, 2.f, RngB);
+		const float AngleDeg = FMath::RadiansToDegrees(FMath::Acos(FVector::DotProduct(A, Forward)));
+		TestTrue(TEXT("inside cone"), AngleDeg <= 2.f + 1e-3f);
+		TestTrue(TEXT("deterministic for same seed"), A.Equals(B, 1e-6f));
+	}
+	TestTrue(TEXT("zero spread exact"), ApplySpreadCone(Forward, 0.f, RngA).Equals(Forward, 1e-6f));
+	return true;
+}
+
+#endif
+```
+`Source/FPSAgent/Tests/RifleFireStateTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Weapons/RifleFireState.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+namespace
+{
+	/** Holds the trigger from Start to End at 60 Hz ticks; returns all fired spray indices. */
+	TArray<int32> HoldTrigger(FRifleFireState& S, const FRifleStats& R, double Start, double End)
+	{
+		TArray<int32> All, Frame;
+		for (double T = Start; T < End - 1e-9; T += 1.0 / 60.0)
+		{
+			S.Update(R, T, true, Frame);
+			All.Append(Frame);
+		}
+		return All;
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSFireCadenceTest, "FPSAgent.Rifle.Cadence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSFireCadenceTest::RunTest(const FString& Parameters)
+{
+	FRifleStats R;
+	R.MagazineSize = 100;
+	FRifleFireState S;
+	S.Reset(R);
+	const TArray<int32> Shots = HoldTrigger(S, R, 0.0, 3.0);
+	TestEqual(TEXT("9.75 rps for 3 s at 60 Hz = 30 shots"), Shots.Num(), 30);
+	for (int32 i = 0; i < Shots.Num(); ++i)
+	{
+		TestEqual(*FString::Printf(TEXT("consecutive spray index %d"), i), Shots[i], i);
+	}
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSMagazineReloadTest, "FPSAgent.Rifle.MagazineReload",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSMagazineReloadTest::RunTest(const FString& Parameters)
+{
+	const FRifleStats R; // 25 rounds, 2.5 s reload
+	FRifleFireState S;
+	S.Reset(R);
+	TArray<int32> Frame;
+	const TArray<int32> Shots = HoldTrigger(S, R, 0.0, 3.0);
+	TestEqual(TEXT("empties the magazine"), Shots.Num(), 25);
+	TestEqual(TEXT("ammo zero"), S.Ammo, 0);
+	TestTrue(TEXT("auto reload started"), S.IsReloading());
+	S.Update(R, 5.5, false, Frame);
+	TestFalse(TEXT("reload finished"), S.IsReloading());
+	TestEqual(TEXT("magazine refilled"), S.Ammo, 25);
+	TestEqual(TEXT("spray reset after reload"), S.ShotIndex, 0);
+	TestEqual(TEXT("no shot while released"), Frame.Num(), 0);
+
+	FRifleFireState Held;
+	Held.Reset(R);
+	HoldTrigger(Held, R, 0.0, 3.0);           // empties, reload ends ~4.97 s
+	const TArray<int32> After = HoldTrigger(Held, R, 3.0, 5.2);
+	TestTrue(TEXT("no burst catch-up after reload while holding"), After.Num() <= 3);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSTapCadenceTest, "FPSAgent.Rifle.TapCadence",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSTapCadenceTest::RunTest(const FString& Parameters)
+{
+	const FRifleStats R;
+	FRifleFireState S;
+	S.Reset(R);
+	TArray<int32> F;
+	TestEqual(TEXT("first tap fires"), S.Update(R, 0.0, true, F), 1);
+	TestEqual(TEXT("release"), S.Update(R, 0.016, false, F), 0);
+	TestEqual(TEXT("re-tap too early blocked"), S.Update(R, 0.05, true, F), 0);
+	TestEqual(TEXT("fires once interval passed"), S.Update(R, 0.11, true, F), 1);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSSprayRecoveryTest, "FPSAgent.Rifle.SprayRecovery",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSSprayRecoveryTest::RunTest(const FString& Parameters)
+{
+	const FRifleStats R;
+	FRifleFireState S;
+	S.Reset(R);
+	TArray<int32> F;
+	HoldTrigger(S, R, 0.0, 0.45);             // 5 shots: indices 0..4
+	S.Update(R, 0.46, false, F);
+	S.Update(R, 0.52, true, F);
+	TestTrue(TEXT("quick re-press continues spray"), F.Num() == 1 && F[0] == 5);
+	S.Update(R, 0.53, false, F);
+	S.Update(R, 2.0, true, F);
+	TestTrue(TEXT("long pause resets to first-shot accuracy"), F.Num() == 1 && F[0] == 0);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Run `powershell -File tools/build.ps1`. Expected: compile error (`Weapons/RifleFireState.h` not found), or unresolved externals for `SpreadDegrees` and the other new functions.
+
+- [ ] **Step 3: Implement.** Append to `Source/FPSAgent/Weapons/CombatMath.cpp`, inside the `namespace FPSCombat` block (before its closing `}`):
+```cpp
+float SpreadDegrees(const FRifleStats& Rifle, const FMovementTuning& Move, float HorizontalSpeed, bool bAirborne, bool bCrouched, int32 ShotIndex)
+{
+	const float Threshold = Move.AccurateSpeedFraction * Move.RunSpeed;
+	float Spread;
+	if (bAirborne)
+	{
+		Spread = Rifle.AirSpreadDeg;
+	}
+	else if (HorizontalSpeed <= Threshold)
+	{
+		Spread = Rifle.FirstShotSpreadDeg;
+	}
+	else
+	{
+		const float Alpha = FMath::Clamp((HorizontalSpeed - Threshold) / FMath::Max(1.f, Move.RunSpeed - Threshold), 0.f, 1.f);
+		Spread = FMath::Lerp(Rifle.WalkSpreadDeg, Rifle.RunSpreadDeg, Alpha);
+	}
+	if (bCrouched && !bAirborne)
+	{
+		Spread *= Rifle.CrouchSpreadMultiplier;
+	}
+	if (ShotIndex >= Rifle.AccurateShots)
+	{
+		Spread += FMath::Min((ShotIndex - Rifle.AccurateShots + 1) * Rifle.SprayBloomPerShotDeg, Rifle.SprayBloomMaxDeg);
+	}
+	return Spread;
+}
+
+FVector2D RecoilOffsetDegrees(const FRifleStats& Rifle, int32 ShotIndex)
+{
+	if (ShotIndex <= 0)
+	{
+		return FVector2D::ZeroVector;
+	}
+	const int32 Accurate = FMath::Max(1, Rifle.AccurateShots);
+	if (ShotIndex < Accurate)
+	{
+		return FVector2D(0.f, ShotIndex * Rifle.RecoilKickFirstShotsDeg);
+	}
+	const float Base = (Accurate - 1) * Rifle.RecoilKickFirstShotsDeg;
+	const float Uncapped = Base + (ShotIndex - Accurate + 1) * Rifle.RecoilClimbPerShotDeg;
+	const float Pitch = FMath::Min(Uncapped, Rifle.RecoilClimbMaxDeg);
+	float Yaw = 0.f;
+	if (Rifle.RecoilClimbPerShotDeg > 0.f && Rifle.RecoilSwayPeriodShots > 0)
+	{
+		const int32 CapIndex = Accurate - 1 + FMath::CeilToInt((Rifle.RecoilClimbMaxDeg - Base) / Rifle.RecoilClimbPerShotDeg);
+		if (ShotIndex > CapIndex)
+		{
+			Yaw = Rifle.RecoilSwayAmplitudeDeg * FMath::Sin(2.f * UE_PI * (ShotIndex - CapIndex) / Rifle.RecoilSwayPeriodShots);
+		}
+	}
+	return FVector2D(Yaw, Pitch);
+}
+
+int32 RecoverShotIndex(int32 ShotIndex, double IdleSeconds, float RecoveryTimePerShot)
+{
+	if (IdleSeconds <= 0.0)
+	{
+		return ShotIndex;
+	}
+	if (RecoveryTimePerShot <= 0.f)
+	{
+		return 0;
+	}
+	const int32 Recovered = FMath::FloorToInt32(IdleSeconds / RecoveryTimePerShot);
+	return FMath::Max(0, ShotIndex - Recovered);
+}
+
+FVector ApplySpreadCone(const FVector& Direction, float SpreadDegrees, const FRandomStream& Rng)
+{
+	const FVector Dir = Direction.GetSafeNormal();
+	if (SpreadDegrees <= 0.f)
+	{
+		return Dir;
+	}
+	return Rng.VRandCone(Dir, FMath::DegreesToRadians(SpreadDegrees));
+}
+```
+`Source/FPSAgent/Weapons/RifleFireState.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Common/FPSAgentTypes.h"
+
+/** Pure fire cadence / ammo / reload state machine. Times in seconds (world time). */
+struct FPSAGENT_API FRifleFireState
+{
+	int32 Ammo = 0;
+	/** Spray index the next shot will use (0 = first, accurate shot). */
+	int32 ShotIndex = 0;
+	double NextShotTime = 0.0;
+	double LastShotTime = -1.0e9;
+	/** < 0 when not reloading. */
+	double ReloadEndTime = -1.0;
+	bool bWasTriggerHeld = false;
+
+	void Reset(const FRifleStats& Stats);
+	bool IsReloading() const { return ReloadEndTime >= 0.0; }
+	/** Starts a reload unless the magazine is full or a reload is running. */
+	bool StartReload(const FRifleStats& Stats, double Now);
+	/** Advances to Now. Fills OutShotIndices with the spray index of each shot fired (oldest first); returns the count. */
+	int32 Update(const FRifleStats& Stats, double Now, bool bTriggerHeld, TArray<int32>& OutShotIndices);
+};
+```
+`Source/FPSAgent/Weapons/RifleFireState.cpp`:
+```cpp
+#include "Weapons/RifleFireState.h"
+#include "Weapons/CombatMath.h"
+
+void FRifleFireState::Reset(const FRifleStats& Stats)
+{
+	*this = FRifleFireState();
+	Ammo = Stats.MagazineSize;
+}
+
+bool FRifleFireState::StartReload(const FRifleStats& Stats, double Now)
+{
+	if (IsReloading() || Ammo >= Stats.MagazineSize)
+	{
+		return false;
+	}
+	ReloadEndTime = Now + Stats.ReloadTime;
+	return true;
+}
+
+int32 FRifleFireState::Update(const FRifleStats& Stats, double Now, bool bTriggerHeld, TArray<int32>& OutShotIndices)
+{
+	OutShotIndices.Reset();
+	if (IsReloading() && Now >= ReloadEndTime)
+	{
+		Ammo = Stats.MagazineSize;
+		ReloadEndTime = -1.0;
+		ShotIndex = 0;
+	}
+	if (!bTriggerHeld || IsReloading())
+	{
+		bWasTriggerHeld = false; // treat the next held frame as a fresh press (no catch-up burst)
+		return 0;
+	}
+	if (Ammo <= 0)
+	{
+		StartReload(Stats, Now);
+		bWasTriggerHeld = false;
+		return 0;
+	}
+	const double Interval = 1.0 / FMath::Max(0.01f, Stats.FireRate);
+	if (!bWasTriggerHeld)
+	{
+		NextShotTime = FMath::Max(NextShotTime, Now);
+	}
+	bWasTriggerHeld = true;
+	while (Ammo > 0 && Now >= NextShotTime)
+	{
+		const double Idle = (NextShotTime - LastShotTime) - Interval;
+		ShotIndex = FPSCombat::RecoverShotIndex(ShotIndex, Idle, Stats.RecoveryTimePerShot);
+		OutShotIndices.Add(ShotIndex);
+		++ShotIndex;
+		--Ammo;
+		LastShotTime = NextShotTime;
+		NextShotTime += Interval;
+	}
+	if (Ammo <= 0)
+	{
+		StartReload(Stats, Now);
+	}
+	return OutShotIndices.Num();
+}
+```
+
+- [ ] **Step 4: Build and test.** Run `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1`. Expected: 13 succeeded, 0 failed.
+
+- [ ] **Step 5: Commit**
+```bash
+git add Game/FPSAgent/Source
+git commit -m "[local] Spread, recoil pattern, spray recovery and fire-cadence state machine with tests" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 5: Health component
+
+**Files:**
+- Create: `Source/FPSAgent/Character/HealthComponent.h/.cpp`, `Tests/HealthComponentTests.cpp`
+
+**Interfaces:**
+- Consumes: `FPSCombat::ApplyDamage`, `UFPSAgentSettings::Get().Health`
+- Produces:
+  - `UHealthComponent` with `ResetToFull()`, `FPSCombat::FDamageResult ApplyHit(float Damage, AActor* DamageInstigator)`, `GetHealth()`, `GetArmor()`, `IsDead()`
+  - Delegates `FOnBeanDamaged OnDamaged` `(UHealthComponent*, const FPSCombat::FDamageResult&, AActor*)` and `FOnBeanDied OnDied` `(UHealthComponent*, AActor* Killer)`
+
+- [ ] **Step 1: Write the failing test** in `Source/FPSAgent/Tests/HealthComponentTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Character/HealthComponent.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSHealthComponentTest, "FPSAgent.Health.Component",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSHealthComponentTest::RunTest(const FString& Parameters)
+{
+	UHealthComponent* H = NewObject<UHealthComponent>();
+	H->ResetToFull();
+	TestEqual(TEXT("full health"), H->GetHealth(), 100.f);
+	TestEqual(TEXT("full armor"), H->GetArmor(), 50.f);
+
+	int32 Damaged = 0, Died = 0;
+	H->OnDamaged.AddLambda([&Damaged](UHealthComponent*, const FPSCombat::FDamageResult&, AActor*) { ++Damaged; });
+	H->OnDied.AddLambda([&Died](UHealthComponent*, AActor*) { ++Died; });
+
+	H->ApplyHit(40.f, nullptr);
+	TestEqual(TEXT("armor absorbed body shot"), H->GetArmor(), 10.f);
+	TestEqual(TEXT("health intact"), H->GetHealth(), 100.f);
+	TestEqual(TEXT("damaged event"), Damaged, 1);
+
+	const FPSCombat::FDamageResult Kill = H->ApplyHit(160.f, nullptr);
+	TestTrue(TEXT("killed"), Kill.bKilled && H->IsDead());
+	TestEqual(TEXT("died event once"), Died, 1);
+
+	H->ApplyHit(40.f, nullptr);
+	TestEqual(TEXT("no events on corpse"), Damaged, 2);
+	TestEqual(TEXT("still one death"), Died, 1);
+
+	H->ResetToFull();
+	TestFalse(TEXT("revived"), H->IsDead());
+	TestEqual(TEXT("armor restored"), H->GetArmor(), 50.f);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Run `powershell -File tools/build.ps1`. Expected: `Character/HealthComponent.h` not found.
+
+- [ ] **Step 3: Implement.** `Source/FPSAgent/Character/HealthComponent.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Weapons/CombatMath.h"
+#include "HealthComponent.generated.h"
+
+class UHealthComponent;
+
+DECLARE_MULTICAST_DELEGATE_ThreeParams(FOnBeanDamaged, UHealthComponent* /*Victim*/, const FPSCombat::FDamageResult& /*Result*/, AActor* /*DamageInstigator*/);
+DECLARE_MULTICAST_DELEGATE_TwoParams(FOnBeanDied, UHealthComponent* /*Victim*/, AActor* /*Killer*/);
+
+/** Health + armor pool. Tuning: UFPSAgentSettings::Health. */
+UCLASS(ClassGroup=(FPSAgent), meta=(BlueprintSpawnableComponent))
+class FPSAGENT_API UHealthComponent : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	UHealthComponent();
+
+	void ResetToFull();
+	/** Applies a hit; ignored (no events) when already dead. */
+	FPSCombat::FDamageResult ApplyHit(float Damage, AActor* DamageInstigator);
+
+	float GetHealth() const { return Health; }
+	float GetArmor() const { return Armor; }
+	bool IsDead() const { return Health <= 0.f; }
+
+	FOnBeanDamaged OnDamaged;
+	FOnBeanDied OnDied;
+
+protected:
+	virtual void BeginPlay() override;
+
+private:
+	UPROPERTY(VisibleInstanceOnly, Category="Health") float Health = 0.f;
+	UPROPERTY(VisibleInstanceOnly, Category="Health") float Armor = 0.f;
+};
+```
+`Source/FPSAgent/Character/HealthComponent.cpp`:
+```cpp
+#include "Character/HealthComponent.h"
+#include "Common/FPSAgentSettings.h"
+
+UHealthComponent::UHealthComponent()
+{
+	PrimaryComponentTick.bCanEverTick = false;
+}
+
+void UHealthComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	ResetToFull();
+}
+
+void UHealthComponent::ResetToFull()
+{
+	const FHealthTuning& T = UFPSAgentSettings::Get().Health;
+	Health = T.MaxHealth;
+	Armor = T.MaxArmor;
+}
+
+FPSCombat::FDamageResult UHealthComponent::ApplyHit(float Damage, AActor* DamageInstigator)
+{
+	const bool bWasAlive = !IsDead();
+	const FPSCombat::FDamageResult R = FPSCombat::ApplyDamage(Health, Armor, Damage, UFPSAgentSettings::Get().Health.ArmorAbsorbFraction);
+	Health = R.Health;
+	Armor = R.Armor;
+	if (bWasAlive && (R.DamageToHealth > 0.f || R.DamageToArmor > 0.f))
+	{
+		OnDamaged.Broadcast(this, R, DamageInstigator);
+	}
+	if (bWasAlive && R.bKilled)
+	{
+		OnDied.Broadcast(this, DamageInstigator);
+	}
+	return R;
+}
+```
+
+- [ ] **Step 4: Build and test.** Run `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1`. Expected: 14 succeeded, 0 failed.
+
+- [ ] **Step 5: Commit**
+```bash
+git add Game/FPSAgent/Source
+git commit -m "[local] Health component (health + armor, damage/death events) with test" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 6: Bean hitbox layout (pure)
+
+**Files:**
+- Create: `Source/FPSAgent/Character/BeanHitboxLayout.h/.cpp`, `Tests/BeanHitboxLayoutTests.cpp`
+
+**Interfaces:**
+- Produces: `struct FBeanHitboxLayout { float HeadCenterZ, HeadRadius, BodyCenterZ; FVector BodyExtent; float LegsCenterZ; FVector LegsExtent; float EyeZ; }` and `FBeanHitboxLayout ComputeBeanHitboxLayout(const FBeanBody&, float CapsuleHalfHeight)`. All Z values are relative to the capsule center.
+
+- [ ] **Step 1: Write the failing test** in `Source/FPSAgent/Tests/BeanHitboxLayoutTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Character/BeanHitboxLayout.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSHitboxLayoutTest, "FPSAgent.Character.HitboxLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSHitboxLayoutTest::RunTest(const FString& Parameters)
+{
+	const FBeanBody B;
+	for (const float H : { B.StandingHalfHeight, B.CrouchedHalfHeight })
+	{
+		const FBeanHitboxLayout L = ComputeBeanHitboxLayout(B, H);
+		const FString Tag = FString::Printf(TEXT("[H=%.0f] "), H);
+		TestEqual(*(Tag + TEXT("legs start at the feet")), L.LegsCenterZ - L.LegsExtent.Z, -H, 1e-3f);
+		TestEqual(*(Tag + TEXT("legs meet body")), L.LegsCenterZ + L.LegsExtent.Z, L.BodyCenterZ - L.BodyExtent.Z, 1e-3f);
+		TestEqual(*(Tag + TEXT("body meets head")), L.BodyCenterZ + L.BodyExtent.Z, L.HeadCenterZ - L.HeadRadius, 1e-3f);
+		TestTrue(*(Tag + TEXT("head inside capsule")), L.HeadCenterZ + L.HeadRadius <= H);
+		TestTrue(*(Tag + TEXT("body has height")), L.BodyExtent.Z > 5.f);
+		TestEqual(*(Tag + TEXT("eye at head center")), L.EyeZ, L.HeadCenterZ);
+	}
+	const float StandingHeadAboveFloor = B.StandingHalfHeight + ComputeBeanHitboxLayout(B, B.StandingHalfHeight).HeadCenterZ;
+	const float CrouchedHeadAboveFloor = B.CrouchedHalfHeight + ComputeBeanHitboxLayout(B, B.CrouchedHalfHeight).HeadCenterZ;
+	TestEqual(TEXT("standing head height"), StandingHeadAboveFloor, 158.f, 1e-3f);
+	TestTrue(TEXT("crouching lowers the head"), CrouchedHeadAboveFloor < StandingHeadAboveFloor - 40.f);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Expected: `Character/BeanHitboxLayout.h` not found.
+
+- [ ] **Step 3: Implement.** `Source/FPSAgent/Character/BeanHitboxLayout.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Common/FPSAgentTypes.h"
+
+/** Hitbox placement relative to the capsule center. Zones stack without gaps: legs | body | head. */
+struct FBeanHitboxLayout
+{
+	float HeadCenterZ = 0.f;
+	float HeadRadius = 0.f;
+	float BodyCenterZ = 0.f;
+	FVector BodyExtent = FVector::ZeroVector;
+	float LegsCenterZ = 0.f;
+	FVector LegsExtent = FVector::ZeroVector;
+	/** Eye / camera height (= head center). */
+	float EyeZ = 0.f;
+};
+
+FPSAGENT_API FBeanHitboxLayout ComputeBeanHitboxLayout(const FBeanBody& Body, float CapsuleHalfHeight);
+```
+`Source/FPSAgent/Character/BeanHitboxLayout.cpp`:
+```cpp
+#include "Character/BeanHitboxLayout.h"
+
+FBeanHitboxLayout ComputeBeanHitboxLayout(const FBeanBody& B, float H)
+{
+	FBeanHitboxLayout L;
+	L.HeadRadius = B.HeadRadius;
+	L.HeadCenterZ = H - B.HeadTopClearance - B.HeadRadius;
+	const float LegsHeight = B.LegFraction * 2.f * H;
+	const float LegsTopZ = -H + LegsHeight;
+	const float BodyTopZ = L.HeadCenterZ - B.HeadRadius;
+	L.LegsCenterZ = -H + 0.5f * LegsHeight;
+	L.LegsExtent = FVector(B.LegsHalfDepth, B.LegsHalfWidth, 0.5f * LegsHeight);
+	L.BodyCenterZ = 0.5f * (LegsTopZ + BodyTopZ);
+	L.BodyExtent = FVector(B.BodyHalfDepth, B.BodyHalfWidth, 0.5f * (BodyTopZ - LegsTopZ));
+	L.EyeZ = L.HeadCenterZ;
+	return L;
+}
+```
+
+- [ ] **Step 4: Build and test.** Expected: 15 succeeded, 0 failed.
+
+- [ ] **Step 5: Commit**
+```bash
+git add Game/FPSAgent/Source
+git commit -m "[local] Bean hitbox layout (head/body/legs from capsule height) with test" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 7: Bean character + hitscan rifle (world tests)
+
+**Files:**
+- Create: `Source/FPSAgent/Character/BeanCharacter.h/.cpp`, `Weapons/RifleComponent.h/.cpp`, `Arena/ArenaBuilder.h/.cpp` (`SpawnBlock` only; Task 8 extends it), `Tests/RifleWorldTests.cpp`
+
+**Interfaces:**
+- Consumes: Tasks 2–6
+- Produces:
+  - `ABeanCharacter`: `GetHealth()`, `GetRifle()`, `GetHitZone(const UPrimitiveComponent*)`, `GetHitbox(EHitZone)`, `GetHorizontalSpeed()`, `IsAirborne()`, `SetWalking(bool)`, `SetHitboxesVisible(bool)`, `SetDeadState(bool)`; protected `Camera`
+  - `URifleComponent`: `SetTriggerHeld(bool)`, `RequestReload()`, `ResetWeapon()`, `SeedRandom(int32)`, `FShotResult FireShot(int32 ShotIndex)`, `GetCurrentSpreadDegrees()`, `GetFireState()`, `FOnShotFired OnShotFired`
+  - `struct FShotResult { int32 ShotIndex; FVector Start, End; float SpreadDegrees; bool bHitWorld; EHitZone Zone; float Damage; bool bKill; TWeakObjectPtr<AActor> HitActor; }`
+  - `FPSArena::SpawnBlock(UWorld*, const FVector& Center, const FVector& Size)` → `AStaticMeshActor*`
+
+- [ ] **Step 1: Write the failing tests** in `Source/FPSAgent/Tests/RifleWorldTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Engine/Engine.h"
+#include "Engine/World.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "Arena/ArenaBuilder.h"
+#include "Character/BeanCharacter.h"
+#include "Character/HealthComponent.h"
+#include "Weapons/RifleComponent.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+namespace
+{
+	/** Bare game world (no map, no game mode, no renderer). Actors here never BeginPlay, so state is reset by hand. */
+	struct FTestWorld
+	{
+		UWorld* World = nullptr;
+		FTestWorld()
+		{
+			World = UWorld::CreateWorld(EWorldType::Game, false);
+			FWorldContext& Ctx = GEngine->CreateNewWorldContext(EWorldType::Game);
+			Ctx.SetCurrentWorld(World);
+		}
+		~FTestWorld()
+		{
+			GEngine->DestroyWorldContext(World);
+			World->DestroyWorld(false);
+		}
+		ABeanCharacter* SpawnBean(const FVector& Location, const FRotator& Rotation) const
+		{
+			FActorSpawnParameters P;
+			P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+			ABeanCharacter* Bean = World->SpawnActor<ABeanCharacter>(Location, Rotation, P);
+			Bean->GetCharacterMovement()->DisableMovement(); // no floor here
+			Bean->GetHealth()->ResetToFull();
+			Bean->GetRifle()->ResetWeapon();
+			Bean->GetRifle()->SeedRandom(7);
+			return Bean;
+		}
+		void Step(int32 Frames = 2) const
+		{
+			for (int32 i = 0; i < Frames; ++i) { World->Tick(LEVELTICK_All, 1.f / 60.f); }
+		}
+	};
+
+	void AimAt(ABeanCharacter* Shooter, const FVector& Target)
+	{
+		FVector Eye; FRotator Unused;
+		Shooter->GetActorEyesViewPoint(Eye, Unused);
+		Shooter->SetActorRotation((Target - Eye).Rotation());
+	}
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRifleHeadshotTest, "FPSAgent.Rifle.World.HeadshotKills",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSRifleHeadshotTest::RunTest(const FString& Parameters)
+{
+	FTestWorld W;
+	ABeanCharacter* Shooter = W.SpawnBean(FVector(0, 0, 100), FRotator::ZeroRotator);
+	ABeanCharacter* Target = W.SpawnBean(FVector(1000, 0, 100), FRotator(0, 180, 0));
+	W.Step();
+	AimAt(Shooter, Target->GetHitbox(EHitZone::Head)->GetComponentLocation());
+	const FShotResult Shot = Shooter->GetRifle()->FireShot(0);
+	TestTrue(TEXT("hit the head"), Shot.Zone == EHitZone::Head);
+	TestEqual(TEXT("head damage"), Shot.Damage, 160.f);
+	TestTrue(TEXT("one-tap kill"), Shot.bKill && Target->GetHealth()->IsDead());
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRifleLegshotTest, "FPSAgent.Rifle.World.LegShot",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSRifleLegshotTest::RunTest(const FString& Parameters)
+{
+	FTestWorld W;
+	ABeanCharacter* Shooter = W.SpawnBean(FVector(0, 0, 100), FRotator::ZeroRotator);
+	ABeanCharacter* Target = W.SpawnBean(FVector(1000, 0, 100), FRotator(0, 180, 0));
+	W.Step();
+	AimAt(Shooter, Target->GetHitbox(EHitZone::Legs)->GetComponentLocation());
+	const FShotResult Shot = Shooter->GetRifle()->FireShot(0);
+	TestTrue(TEXT("hit the legs"), Shot.Zone == EHitZone::Legs);
+	TestEqual(TEXT("leg damage"), Shot.Damage, 34.f);
+	TestEqual(TEXT("armor took it"), Target->GetHealth()->GetArmor(), 16.f);
+	TestEqual(TEXT("health intact"), Target->GetHealth()->GetHealth(), 100.f);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRifleWallTest, "FPSAgent.Rifle.World.WallBlocks",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSRifleWallTest::RunTest(const FString& Parameters)
+{
+	FTestWorld W;
+	ABeanCharacter* Shooter = W.SpawnBean(FVector(0, 0, 100), FRotator::ZeroRotator);
+	ABeanCharacter* Target = W.SpawnBean(FVector(1000, 0, 100), FRotator(0, 180, 0));
+	FPSArena::SpawnBlock(W.World, FVector(500, 0, 150), FVector(50, 400, 400));
+	W.Step();
+	AimAt(Shooter, Target->GetHitbox(EHitZone::Head)->GetComponentLocation());
+	const FShotResult Shot = Shooter->GetRifle()->FireShot(0);
+	TestTrue(TEXT("wall stopped the bullet"), Shot.bHitWorld && Shot.Zone == EHitZone::None);
+	TestEqual(TEXT("target untouched"), Target->GetHealth()->GetArmor(), 50.f);
+	TestTrue(TEXT("impact near the wall"), FMath::Abs(Shot.End.X - 475.f) < 5.f);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Expected: `Arena/ArenaBuilder.h` / `Character/BeanCharacter.h` not found.
+
+- [ ] **Step 3: Implement.** `Source/FPSAgent/Arena/ArenaBuilder.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Common/FPSAgentTypes.h"
+
+class AStaticMeshActor;
+class UWorld;
+
+/** Runtime level geometry from data: no .umap needed, works headless. */
+namespace FPSArena
+{
+	/** Axis-aligned gray box. Center and Size in cm. Blocks movement, visibility and the Weapon channel. */
+	FPSAGENT_API AStaticMeshActor* SpawnBlock(UWorld* World, const FVector& Center, const FVector& Size);
+}
+```
+`Source/FPSAgent/Arena/ArenaBuilder.cpp`:
+```cpp
+#include "Arena/ArenaBuilder.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/World.h"
+
+namespace FPSArena
+{
+AStaticMeshActor* SpawnBlock(UWorld* World, const FVector& Center, const FVector& Size)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")); // 100 cm cube, centered pivot
+	const FTransform Xf(FRotator::ZeroRotator, Center, Size / 100.f);
+	AStaticMeshActor* Block = World->SpawnActorDeferred<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Xf, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	UStaticMeshComponent* Mesh = Block->GetStaticMeshComponent();
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetStaticMesh(Cube);
+	Block->FinishSpawning(Xf);
+	return Block;
+}
+} // namespace FPSArena
+```
+`Source/FPSAgent/Weapons/RifleComponent.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Components/ActorComponent.h"
+#include "Common/FPSAgentTypes.h"
+#include "Weapons/RifleFireState.h"
+#include "RifleComponent.generated.h"
+
+/** One fired bullet: for HUD hit markers, metrics and (later) RL rewards. */
+struct FShotResult
+{
+	int32 ShotIndex = 0;
+	FVector Start = FVector::ZeroVector;
+	FVector End = FVector::ZeroVector;
+	float SpreadDegrees = 0.f;
+	bool bHitWorld = false;
+	EHitZone Zone = EHitZone::None;
+	float Damage = 0.f;
+	bool bKill = false;
+	TWeakObjectPtr<AActor> HitActor;
+};
+
+DECLARE_MULTICAST_DELEGATE_OneParam(FOnShotFired, const FShotResult&);
+
+/** Hitscan automatic rifle. Stats: UFPSAgentSettings::Rifle. Fires along the owner's eyes view point. */
+UCLASS(ClassGroup=(FPSAgent), meta=(BlueprintSpawnableComponent))
+class FPSAGENT_API URifleComponent : public UActorComponent
+{
+	GENERATED_BODY()
+
+public:
+	URifleComponent();
+
+	void SetTriggerHeld(bool bHeld) { bTriggerHeld = bHeld; }
+	bool IsTriggerHeld() const { return bTriggerHeld; }
+	void RequestReload();
+	void ResetWeapon();
+	void SeedRandom(int32 Seed) { Rng.Initialize(Seed); }
+
+	/** Traces one bullet using ShotIndex for recoil and bloom. Bypasses cadence/ammo (used by Tick and tests). */
+	FShotResult FireShot(int32 ShotIndex);
+	/** Spread the next shot would have right now. */
+	float GetCurrentSpreadDegrees() const { return SpreadFor(State.ShotIndex); }
+	const FRifleFireState& GetFireState() const { return State; }
+
+	FOnShotFired OnShotFired;
+
+	virtual void TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction) override;
+
+protected:
+	virtual void BeginPlay() override;
+
+private:
+	float SpreadFor(int32 ShotIndex) const;
+
+	FRifleFireState State;
+	FRandomStream Rng;
+	bool bTriggerHeld = false;
+	TArray<int32> PendingShots;
+};
+```
+`Source/FPSAgent/Weapons/RifleComponent.cpp`:
+```cpp
+#include "Weapons/RifleComponent.h"
+#include "Character/BeanCharacter.h"
+#include "Character/HealthComponent.h"
+#include "Common/FPSAgentSettings.h"
+#include "Engine/World.h"
+#include "Weapons/CombatMath.h"
+
+URifleComponent::URifleComponent()
+{
+	PrimaryComponentTick.bCanEverTick = true;
+	PrimaryComponentTick.TickGroup = TG_PostPhysics; // fire after movement so the eye point is current
+	Rng.Initialize(0);
+}
+
+void URifleComponent::BeginPlay()
+{
+	Super::BeginPlay();
+	ResetWeapon();
+}
+
+void URifleComponent::ResetWeapon()
+{
+	State.Reset(UFPSAgentSettings::Get().Rifle);
+	bTriggerHeld = false;
+}
+
+void URifleComponent::RequestReload()
+{
+	if (const UWorld* World = GetWorld())
+	{
+		State.StartReload(UFPSAgentSettings::Get().Rifle, World->GetTimeSeconds());
+	}
+}
+
+void URifleComponent::TickComponent(float DeltaTime, ELevelTick TickType, FActorComponentTickFunction* ThisTickFunction)
+{
+	Super::TickComponent(DeltaTime, TickType, ThisTickFunction);
+	State.Update(UFPSAgentSettings::Get().Rifle, GetWorld()->GetTimeSeconds(), bTriggerHeld, PendingShots);
+	for (const int32 Index : PendingShots)
+	{
+		FireShot(Index);
+	}
+}
+
+float URifleComponent::SpreadFor(int32 ShotIndex) const
+{
+	const UFPSAgentSettings& S = UFPSAgentSettings::Get();
+	const ABeanCharacter* Bean = Cast<ABeanCharacter>(GetOwner());
+	const float Speed = Bean ? Bean->GetHorizontalSpeed() : 0.f;
+	const bool bAirborne = Bean && Bean->IsAirborne();
+	const bool bCrouched = Bean && Bean->bIsCrouched;
+	return FPSCombat::SpreadDegrees(S.Rifle, S.Movement, Speed, bAirborne, bCrouched, ShotIndex);
+}
+
+FShotResult URifleComponent::FireShot(int32 ShotIndex)
+{
+	FShotResult Result;
+	Result.ShotIndex = ShotIndex;
+	AActor* OwnerActor = GetOwner();
+	UWorld* World = GetWorld();
+	if (!OwnerActor || !World)
+	{
+		return Result;
+	}
+
+	const FRifleStats& Stats = UFPSAgentSettings::Get().Rifle;
+	FVector EyeLocation;
+	FRotator EyeRotation;
+	OwnerActor->GetActorEyesViewPoint(EyeLocation, EyeRotation);
+	const FVector2D Recoil = FPSCombat::RecoilOffsetDegrees(Stats, ShotIndex);
+	EyeRotation.Pitch += Recoil.Y;
+	EyeRotation.Yaw += Recoil.X;
+	Result.SpreadDegrees = SpreadFor(ShotIndex);
+	const FVector Direction = FPSCombat::ApplySpreadCone(EyeRotation.Vector(), Result.SpreadDegrees, Rng);
+	Result.Start = EyeLocation;
+	Result.End = EyeLocation + Direction * Stats.MaxRangeCm;
+
+	FCollisionQueryParams Params(SCENE_QUERY_STAT(RifleShot), /*bTraceComplex=*/false, OwnerActor);
+	FHitResult Hit;
+	if (World->LineTraceSingleByChannel(Hit, Result.Start, Result.End, ECC_Weapon, Params))
+	{
+		Result.End = Hit.ImpactPoint;
+		Result.HitActor = Hit.GetActor();
+		ABeanCharacter* Victim = Cast<ABeanCharacter>(Hit.GetActor());
+		Result.Zone = Victim ? Victim->GetHitZone(Hit.GetComponent()) : EHitZone::None;
+		if (Result.Zone != EHitZone::None)
+		{
+			Result.Damage = FPSCombat::DamageForZone(Stats, Result.Zone);
+			Result.bKill = Victim->GetHealth()->ApplyHit(Result.Damage, OwnerActor).bKilled;
+		}
+		else
+		{
+			Result.bHitWorld = true;
+		}
+	}
+	OnShotFired.Broadcast(Result);
+	return Result;
+}
+```
+`Source/FPSAgent/Character/BeanCharacter.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Character.h"
+#include "Common/FPSAgentTypes.h"
+#include "BeanCharacter.generated.h"
+
+class UBoxComponent;
+class UCameraComponent;
+class UHealthComponent;
+class URifleComponent;
+class USphereComponent;
+class UStaticMeshComponent;
+
+/** The bean: capsule movement body + head/body/legs hitboxes + rifle + health. Gameplay is render-free (works under -nullrhi). */
+UCLASS()
+class FPSAGENT_API ABeanCharacter : public ACharacter
+{
+	GENERATED_BODY()
+
+public:
+	ABeanCharacter(const FObjectInitializer& ObjectInitializer);
+
+	UHealthComponent* GetHealth() const { return Health; }
+	URifleComponent* GetRifle() const { return Rifle; }
+	/** Zone of one of this bean's hitbox components, or None. */
+	EHitZone GetHitZone(const UPrimitiveComponent* Component) const;
+	UPrimitiveComponent* GetHitbox(EHitZone Zone) const;
+	float GetHorizontalSpeed() const;
+	bool IsAirborne() const;
+	void SetWalking(bool bWalk);
+	void SetHitboxesVisible(bool bVisible);
+	/** Dead beans are hidden, have no collision, and neither move nor shoot. */
+	void SetDeadState(bool bDead);
+
+	virtual void BeginPlay() override;
+	virtual void OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+	virtual void OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust) override;
+
+protected:
+	void ApplyMovementTuning();
+	void ApplyBodyLayout(float CapsuleHalfHeight);
+
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<USphereComponent> HeadHitbox;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<UBoxComponent> BodyHitbox;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<UBoxComponent> LegsHitbox;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<UStaticMeshComponent> BodyMesh;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<UStaticMeshComponent> TopMesh;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<UStaticMeshComponent> BottomMesh;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<UCameraComponent> Camera;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<UHealthComponent> Health;
+	UPROPERTY(VisibleAnywhere, Category="Bean") TObjectPtr<URifleComponent> Rifle;
+
+private:
+	bool bWalking = false;
+};
+```
+`Source/FPSAgent/Character/BeanCharacter.cpp`:
+```cpp
+#include "Character/BeanCharacter.h"
+#include "Camera/CameraComponent.h"
+#include "Character/BeanHitboxLayout.h"
+#include "Character/HealthComponent.h"
+#include "Common/FPSAgentSettings.h"
+#include "Components/BoxComponent.h"
+#include "Components/CapsuleComponent.h"
+#include "Components/SkeletalMeshComponent.h"
+#include "Components/SphereComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/StaticMesh.h"
+#include "GameFramework/CharacterMovementComponent.h"
+#include "UObject/ConstructorHelpers.h"
+#include "Weapons/RifleComponent.h"
+
+namespace
+{
+	void ConfigureHitbox(UShapeComponent* Shape)
+	{
+		Shape->SetCollisionEnabled(ECollisionEnabled::QueryOnly);
+		Shape->SetCollisionObjectType(ECC_Pawn);
+		Shape->SetCollisionResponseToAllChannels(ECR_Ignore);
+		Shape->SetCollisionResponseToChannel(ECC_Weapon, ECR_Block);
+		Shape->SetGenerateOverlapEvents(false);
+		Shape->SetCanEverAffectNavigation(false);
+		Shape->SetHiddenInGame(true);
+	}
+
+	void ConfigureVisual(UStaticMeshComponent* Mesh, UStaticMesh* Asset)
+	{
+		Mesh->SetStaticMesh(Asset);
+		Mesh->SetCollisionEnabled(ECollisionEnabled::NoCollision);
+		Mesh->SetGenerateOverlapEvents(false);
+		Mesh->SetCanEverAffectNavigation(false);
+	}
+}
+
+ABeanCharacter::ABeanCharacter(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	PrimaryActorTick.bCanEverTick = false;
+	const UFPSAgentSettings& S = UFPSAgentSettings::Get();
+
+	UCapsuleComponent* Capsule = GetCapsuleComponent();
+	Capsule->InitCapsuleSize(S.Body.CapsuleRadius, S.Body.StandingHalfHeight);
+	Capsule->SetCollisionResponseToChannel(ECC_Weapon, ECR_Ignore); // bullets hit hitboxes, not the capsule
+
+	GetMesh()->SetCollisionEnabled(ECollisionEnabled::NoCollision);  // unused skeletal mesh slot
+	GetMesh()->PrimaryComponentTick.bStartWithTickEnabled = false;
+
+	bUseControllerRotationPitch = false;
+	bUseControllerRotationYaw = true;
+	bUseControllerRotationRoll = false;
+
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	Move->bOrientRotationToMovement = false;
+	Move->GetNavAgentPropertiesRef().bCanCrouch = true;
+	Move->SetCrouchedHalfHeight(S.Body.CrouchedHalfHeight);
+
+	HeadHitbox = CreateDefaultSubobject<USphereComponent>(TEXT("HeadHitbox"));
+	BodyHitbox = CreateDefaultSubobject<UBoxComponent>(TEXT("BodyHitbox"));
+	LegsHitbox = CreateDefaultSubobject<UBoxComponent>(TEXT("LegsHitbox"));
+	UShapeComponent* Hitboxes[] = { HeadHitbox.Get(), BodyHitbox.Get(), LegsHitbox.Get() };
+	for (UShapeComponent* Shape : Hitboxes)
+	{
+		Shape->SetupAttachment(Capsule);
+		ConfigureHitbox(Shape);
+	}
+
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> CylinderMesh(TEXT("/Engine/BasicShapes/Cylinder.Cylinder"));
+	static ConstructorHelpers::FObjectFinder<UStaticMesh> SphereMesh(TEXT("/Engine/BasicShapes/Sphere.Sphere"));
+	BodyMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BodyMesh"));
+	TopMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("TopMesh"));
+	BottomMesh = CreateDefaultSubobject<UStaticMeshComponent>(TEXT("BottomMesh"));
+	BodyMesh->SetupAttachment(Capsule);
+	TopMesh->SetupAttachment(Capsule);
+	BottomMesh->SetupAttachment(Capsule);
+	ConfigureVisual(BodyMesh, CylinderMesh.Object);
+	ConfigureVisual(TopMesh, SphereMesh.Object);
+	ConfigureVisual(BottomMesh, SphereMesh.Object);
+
+	Camera = CreateDefaultSubobject<UCameraComponent>(TEXT("Camera"));
+	Camera->SetupAttachment(Capsule);
+	Camera->bUsePawnControlRotation = true;
+
+	Health = CreateDefaultSubobject<UHealthComponent>(TEXT("Health"));
+	Rifle = CreateDefaultSubobject<URifleComponent>(TEXT("Rifle"));
+
+	BaseEyeHeight = ComputeBeanHitboxLayout(S.Body, S.Body.StandingHalfHeight).EyeZ;
+	CrouchedEyeHeight = ComputeBeanHitboxLayout(S.Body, S.Body.CrouchedHalfHeight).EyeZ;
+	ApplyMovementTuning();
+	ApplyBodyLayout(S.Body.StandingHalfHeight);
+}
+
+void ABeanCharacter::BeginPlay()
+{
+	Super::BeginPlay();
+	ApplyMovementTuning(); // pick up settings edited after the CDO was built
+	ApplyBodyLayout(GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
+}
+
+void ABeanCharacter::ApplyMovementTuning()
+{
+	const FMovementTuning& M = UFPSAgentSettings::Get().Movement;
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	Move->MaxWalkSpeed = bWalking ? M.WalkSpeed : M.RunSpeed;
+	Move->MaxWalkSpeedCrouched = M.CrouchSpeed;
+	Move->MaxAcceleration = M.MaxAcceleration;
+	Move->BrakingDecelerationWalking = M.BrakingDeceleration;
+	Move->GroundFriction = M.GroundFriction;
+	Move->JumpZVelocity = M.JumpZVelocity;
+	Move->AirControl = M.AirControl;
+}
+
+void ABeanCharacter::ApplyBodyLayout(float CapsuleHalfHeight)
+{
+	const FBeanBody& B = UFPSAgentSettings::Get().Body;
+	const FBeanHitboxLayout L = ComputeBeanHitboxLayout(B, CapsuleHalfHeight);
+	HeadHitbox->SetSphereRadius(L.HeadRadius);
+	HeadHitbox->SetRelativeLocation(FVector(0.f, 0.f, L.HeadCenterZ));
+	BodyHitbox->SetBoxExtent(L.BodyExtent);
+	BodyHitbox->SetRelativeLocation(FVector(0.f, 0.f, L.BodyCenterZ));
+	LegsHitbox->SetBoxExtent(L.LegsExtent);
+	LegsHitbox->SetRelativeLocation(FVector(0.f, 0.f, L.LegsCenterZ));
+	Camera->SetRelativeLocation(FVector(0.f, 0.f, L.EyeZ));
+
+	// Visual bean = cylinder between two spheres (engine basic shapes are 100 cm across, centered).
+	const float R = B.CapsuleRadius;
+	const float XY = 2.f * R / 100.f;
+	BodyMesh->SetRelativeScale3D(FVector(XY, XY, FMath::Max(0.f, 2.f * CapsuleHalfHeight - 2.f * R) / 100.f));
+	TopMesh->SetRelativeScale3D(FVector(XY));
+	TopMesh->SetRelativeLocation(FVector(0.f, 0.f, CapsuleHalfHeight - R));
+	BottomMesh->SetRelativeScale3D(FVector(XY));
+	BottomMesh->SetRelativeLocation(FVector(0.f, 0.f, -(CapsuleHalfHeight - R)));
+}
+
+void ABeanCharacter::OnStartCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+	Super::OnStartCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+	ApplyBodyLayout(GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
+}
+
+void ABeanCharacter::OnEndCrouch(float HalfHeightAdjust, float ScaledHalfHeightAdjust)
+{
+	Super::OnEndCrouch(HalfHeightAdjust, ScaledHalfHeightAdjust);
+	ApplyBodyLayout(GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight());
+}
+
+EHitZone ABeanCharacter::GetHitZone(const UPrimitiveComponent* Component) const
+{
+	if (Component == HeadHitbox) { return EHitZone::Head; }
+	if (Component == BodyHitbox) { return EHitZone::Body; }
+	if (Component == LegsHitbox) { return EHitZone::Legs; }
+	return EHitZone::None;
+}
+
+UPrimitiveComponent* ABeanCharacter::GetHitbox(EHitZone Zone) const
+{
+	switch (Zone)
+	{
+	case EHitZone::Head: return HeadHitbox;
+	case EHitZone::Body: return BodyHitbox;
+	case EHitZone::Legs: return LegsHitbox;
+	default:             return nullptr;
+	}
+}
+
+float ABeanCharacter::GetHorizontalSpeed() const
+{
+	return GetVelocity().Size2D();
+}
+
+bool ABeanCharacter::IsAirborne() const
+{
+	return GetCharacterMovement()->IsFalling();
+}
+
+void ABeanCharacter::SetWalking(bool bWalk)
+{
+	bWalking = bWalk;
+	const FMovementTuning& M = UFPSAgentSettings::Get().Movement;
+	GetCharacterMovement()->MaxWalkSpeed = bWalking ? M.WalkSpeed : M.RunSpeed;
+}
+
+void ABeanCharacter::SetHitboxesVisible(bool bVisible)
+{
+	HeadHitbox->SetHiddenInGame(!bVisible);
+	BodyHitbox->SetHiddenInGame(!bVisible);
+	LegsHitbox->SetHiddenInGame(!bVisible);
+}
+
+void ABeanCharacter::SetDeadState(bool bDead)
+{
+	SetActorHiddenInGame(bDead);
+	SetActorEnableCollision(!bDead);
+	Rifle->SetTriggerHeld(false);
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	if (bDead)
+	{
+		Move->StopMovementImmediately();
+		Move->DisableMovement();
+	}
+	else
+	{
+		Move->SetMovementMode(MOVE_Walking);
+	}
+}
+```
+
+- [ ] **Step 4: Build and test.** Expected: 18 succeeded, 0 failed.
+
+If the World tests report `Zone None` with `bHitWorld false` (the trace found nothing), raise `W.Step()` to 5 frames. Chaos may not have indexed new bodies yet. If they still miss, add `W.World->InitializeActorsForPlay(FURL());` after creating the world context, then re-run.
+
+- [ ] **Step 5: Commit**
+```bash
+git add Game/FPSAgent/Source
+git commit -m "[local] Bean character (hitboxes, visuals, movement tuning) and hitscan rifle with world tests" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 8: Playable range: input, HUD, runtime arena, game mode
+
+**Files:**
+- Modify: `Source/FPSAgent/Arena/ArenaBuilder.h/.cpp` (full new content below), `Config/DefaultEngine.ini` (add the game mode line)
+- Create: `Config/DefaultInput.ini`, `Source/FPSAgent/Character/BeanPlayerController.h/.cpp`, `Arena/BeanHUD.h/.cpp`, `Arena/RangeGameMode.h/.cpp`, `Tests/ArenaTests.cpp`
+
+**Interfaces:**
+- Produces:
+  - `FPSArena::FRangeLayout { FTransform PlayerStart; TArray<FTransform> BotSpawns; }`
+  - `FPSArena::ComputeRangeLayout(const FRangeSettings&, const FVector& Origin, float SpawnHeightCm)`
+  - `FPSArena::BuildRange(UWorld*, const FRangeSettings&, const FVector& Origin)` → `FRangeLayout`
+  - `FPSArena::SpawnPreviewLighting(UWorld*)`
+  - `ARangeGameMode`, which keeps `Layout` for Task 9
+  - `ABeanPlayerController` (exec `ShowHitboxes 1`)
+  - `ABeanHUD`
+
+- [ ] **Step 1: Write the failing test** in `Source/FPSAgent/Tests/ArenaTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Arena/ArenaBuilder.h"
+#include "Common/FPSAgentSettings.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSRangeLayoutTest, "FPSAgent.Arena.RangeLayout",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSRangeLayoutTest::RunTest(const FString& Parameters)
+{
+	const FRangeSettings& Range = UFPSAgentSettings::Get().Range;
+	const FVector Origin(100.f, 200.f, 0.f);
+	const FPSArena::FRangeLayout L = FPSArena::ComputeRangeLayout(Range, Origin, 90.f);
+	TestEqual(TEXT("player at origin, raised"), L.PlayerStart.GetLocation(), Origin + FVector(0, 0, 90.f));
+	TestEqual(TEXT("player faces +X"), L.PlayerStart.Rotator().Yaw, 0.f, 1e-3f);
+	TestEqual(TEXT("one bot per lane"), L.BotSpawns.Num(), Range.Lanes.Num());
+	for (int32 i = 0; i < Range.Lanes.Num(); ++i)
+	{
+		const FVector Expected = Origin + FVector(Range.Lanes[i].DistanceCm, Range.Lanes[i].LateralCm, 90.f);
+		TestEqual(*FString::Printf(TEXT("lane %d position"), i), L.BotSpawns[i].GetLocation(), Expected);
+		TestEqual(*FString::Printf(TEXT("lane %d faces player"), i), FMath::Abs(L.BotSpawns[i].Rotator().Yaw), 180.f, 1e-3f);
+	}
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Expected: `ComputeRangeLayout` is not a member of `FPSArena`.
+
+- [ ] **Step 3: Implement the arena builder.** Replace `Source/FPSAgent/Arena/ArenaBuilder.h` with:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Common/FPSAgentTypes.h"
+
+class AStaticMeshActor;
+class UWorld;
+
+/** Runtime level geometry from data: no .umap needed, works headless. */
+namespace FPSArena
+{
+	/** Axis-aligned gray box. Center and Size in cm. Blocks movement, visibility and the Weapon channel. */
+	FPSAGENT_API AStaticMeshActor* SpawnBlock(UWorld* World, const FVector& Center, const FVector& Size);
+
+	struct FRangeLayout
+	{
+		FTransform PlayerStart;
+		/** One per FRangeSettings::Lanes entry, same order. */
+		TArray<FTransform> BotSpawns;
+	};
+
+	/** Pure: player at Origin facing +X; lane bots in front, facing the player. SpawnHeightCm lifts capsules off the floor. */
+	FPSAGENT_API FRangeLayout ComputeRangeLayout(const FRangeSettings& Range, const FVector& Origin, float SpawnHeightCm);
+
+	/** Floor + four walls around the range whose player stands at Origin (floor top = Origin.Z). */
+	FPSAGENT_API FRangeLayout BuildRange(UWorld* World, const FRangeSettings& Range, const FVector& Origin);
+
+	/** Two movable directional lights for viewing; does nothing under -nullrhi. */
+	FPSAGENT_API void SpawnPreviewLighting(UWorld* World);
+}
+```
+Replace `Source/FPSAgent/Arena/ArenaBuilder.cpp` with:
+```cpp
+#include "Arena/ArenaBuilder.h"
+#include "Common/FPSAgentSettings.h"
+#include "Components/LightComponent.h"
+#include "Components/StaticMeshComponent.h"
+#include "Engine/DirectionalLight.h"
+#include "Engine/StaticMesh.h"
+#include "Engine/StaticMeshActor.h"
+#include "Engine/World.h"
+#include "Misc/App.h"
+
+namespace FPSArena
+{
+AStaticMeshActor* SpawnBlock(UWorld* World, const FVector& Center, const FVector& Size)
+{
+	UStaticMesh* Cube = LoadObject<UStaticMesh>(nullptr, TEXT("/Engine/BasicShapes/Cube.Cube")); // 100 cm cube, centered pivot
+	const FTransform Xf(FRotator::ZeroRotator, Center, Size / 100.f);
+	AStaticMeshActor* Block = World->SpawnActorDeferred<AStaticMeshActor>(AStaticMeshActor::StaticClass(), Xf, nullptr, nullptr,
+		ESpawnActorCollisionHandlingMethod::AlwaysSpawn);
+	UStaticMeshComponent* Mesh = Block->GetStaticMeshComponent();
+	Mesh->SetMobility(EComponentMobility::Movable);
+	Mesh->SetStaticMesh(Cube);
+	Block->FinishSpawning(Xf);
+	return Block;
+}
+
+FRangeLayout ComputeRangeLayout(const FRangeSettings& Range, const FVector& Origin, float SpawnHeightCm)
+{
+	FRangeLayout L;
+	L.PlayerStart = FTransform(FRotator::ZeroRotator, Origin + FVector(0.f, 0.f, SpawnHeightCm));
+	for (const FRangeLane& Lane : Range.Lanes)
+	{
+		L.BotSpawns.Add(FTransform(FRotator(0.f, 180.f, 0.f), Origin + FVector(Lane.DistanceCm, Lane.LateralCm, SpawnHeightCm)));
+	}
+	return L;
+}
+
+FRangeLayout BuildRange(UWorld* World, const FRangeSettings& Range, const FVector& Origin)
+{
+	const float Len = Range.ArenaLengthCm;
+	const float Wid = Range.ArenaWidthCm;
+	const float Hgt = Range.WallHeightCm;
+	const float Thk = Range.WallThicknessCm;
+	const float BackGap = 500.f; // floor extends 5 m behind the player
+	const float CenterX = Origin.X + 0.5f * Len - BackGap;
+
+	SpawnBlock(World, FVector(CenterX, Origin.Y, Origin.Z - 0.5f * Thk), FVector(Len, Wid, Thk));                              // floor
+	SpawnBlock(World, FVector(CenterX, Origin.Y - 0.5f * (Wid + Thk), Origin.Z + 0.5f * Hgt), FVector(Len, Thk, Hgt));         // left
+	SpawnBlock(World, FVector(CenterX, Origin.Y + 0.5f * (Wid + Thk), Origin.Z + 0.5f * Hgt), FVector(Len, Thk, Hgt));         // right
+	SpawnBlock(World, FVector(Origin.X - BackGap - 0.5f * Thk, Origin.Y, Origin.Z + 0.5f * Hgt), FVector(Thk, Wid, Hgt));      // back
+	SpawnBlock(World, FVector(Origin.X + Len - BackGap + 0.5f * Thk, Origin.Y, Origin.Z + 0.5f * Hgt), FVector(Thk, Wid, Hgt)); // front
+
+	return ComputeRangeLayout(Range, Origin, UFPSAgentSettings::Get().Body.StandingHalfHeight + 2.f);
+}
+
+void SpawnPreviewLighting(UWorld* World)
+{
+	if (!FApp::CanEverRender())
+	{
+		return;
+	}
+	auto SpawnLight = [World](const FRotator& Rotation, float Intensity)
+	{
+		const FTransform Xf(Rotation, FVector::ZeroVector);
+		ADirectionalLight* Light = World->SpawnActorDeferred<ADirectionalLight>(ADirectionalLight::StaticClass(), Xf);
+		Light->GetLightComponent()->SetMobility(EComponentMobility::Movable);
+		Light->GetLightComponent()->SetIntensity(Intensity);
+		Light->FinishSpawning(Xf);
+	};
+	SpawnLight(FRotator(-50.f, -30.f, 0.f), 8.f); // key
+	SpawnLight(FRotator(-30.f, 150.f, 0.f), 3.f); // fill
+}
+} // namespace FPSArena
+```
+
+- [ ] **Step 4: Implement input, HUD and game mode.**
+
+`Config/DefaultInput.ini`:
+```ini
+[/Script/Engine.InputSettings]
+DefaultPlayerInputClass=/Script/EnhancedInput.EnhancedPlayerInput
+DefaultInputComponentClass=/Script/EnhancedInput.EnhancedInputComponent
+```
+`Config/DefaultEngine.ini`: add one line under `[/Script/EngineSettings.GameMapsSettings]`:
+```ini
+GlobalDefaultGameMode=/Script/FPSAgent.RangeGameMode
+```
+`Source/FPSAgent/Character/BeanPlayerController.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/PlayerController.h"
+#include "BeanPlayerController.generated.h"
+
+class ABeanCharacter;
+class UInputAction;
+class UInputMappingContext;
+struct FInputActionValue;
+
+/** Human play-testing controls, built in code (no input assets). WASD, mouse, LMB fire, Space, Ctrl crouch, Shift walk, R reload. */
+UCLASS()
+class FPSAGENT_API ABeanPlayerController : public APlayerController
+{
+	GENERATED_BODY()
+
+public:
+	/** Console: "ShowHitboxes 1" draws every bean's hitboxes. */
+	UFUNCTION(Exec)
+	void ShowHitboxes(bool bShow);
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void SetupInputComponent() override;
+
+private:
+	void BuildInput();
+	ABeanCharacter* GetBean() const;
+	void OnMove(const FInputActionValue& Value);
+	void OnLook(const FInputActionValue& Value);
+	void OnFirePressed();
+	void OnFireReleased();
+	void OnJumpPressed();
+	void OnJumpReleased();
+	void OnCrouchPressed();
+	void OnCrouchReleased();
+	void OnWalkPressed();
+	void OnWalkReleased();
+	void OnReload();
+
+	UPROPERTY() TObjectPtr<UInputMappingContext> Mapping;
+	UPROPERTY() TObjectPtr<UInputAction> MoveAction;
+	UPROPERTY() TObjectPtr<UInputAction> LookAction;
+	UPROPERTY() TObjectPtr<UInputAction> FireAction;
+	UPROPERTY() TObjectPtr<UInputAction> JumpAction;
+	UPROPERTY() TObjectPtr<UInputAction> CrouchAction;
+	UPROPERTY() TObjectPtr<UInputAction> WalkAction;
+	UPROPERTY() TObjectPtr<UInputAction> ReloadAction;
+};
+```
+`Source/FPSAgent/Character/BeanPlayerController.cpp`:
+```cpp
+#include "Character/BeanPlayerController.h"
+#include "Character/BeanCharacter.h"
+#include "Common/FPSAgentSettings.h"
+#include "EngineUtils.h"
+#include "EnhancedInputComponent.h"
+#include "EnhancedInputSubsystems.h"
+#include "Engine/LocalPlayer.h"
+#include "FPSAgent.h"
+#include "InputAction.h"
+#include "InputActionValue.h"
+#include "InputMappingContext.h"
+#include "InputModifiers.h"
+#include "Weapons/RifleComponent.h"
+
+void ABeanPlayerController::BuildInput()
+{
+	if (Mapping)
+	{
+		return;
+	}
+	auto MakeAction = [this](const TCHAR* Name, EInputActionValueType Type)
+	{
+		UInputAction* Action = NewObject<UInputAction>(this, Name);
+		Action->ValueType = Type;
+		return Action;
+	};
+	MoveAction   = MakeAction(TEXT("IA_Move"),   EInputActionValueType::Axis2D);
+	LookAction   = MakeAction(TEXT("IA_Look"),   EInputActionValueType::Axis2D);
+	FireAction   = MakeAction(TEXT("IA_Fire"),   EInputActionValueType::Boolean);
+	JumpAction   = MakeAction(TEXT("IA_Jump"),   EInputActionValueType::Boolean);
+	CrouchAction = MakeAction(TEXT("IA_Crouch"), EInputActionValueType::Boolean);
+	WalkAction   = MakeAction(TEXT("IA_Walk"),   EInputActionValueType::Boolean);
+	ReloadAction = MakeAction(TEXT("IA_Reload"), EInputActionValueType::Boolean);
+
+	Mapping = NewObject<UInputMappingContext>(this, TEXT("IMC_Bean"));
+	auto Swizzle = [this]() { return NewObject<UInputModifierSwizzleAxis>(Mapping); }; // X -> Y (forward)
+	auto Negate  = [this]() { return NewObject<UInputModifierNegate>(Mapping); };
+	Mapping->MapKey(MoveAction, EKeys::W).Modifiers.Add(Swizzle());
+	{
+		FEnhancedActionKeyMapping& Back = Mapping->MapKey(MoveAction, EKeys::S);
+		Back.Modifiers.Add(Swizzle());
+		Back.Modifiers.Add(Negate());
+	}
+	Mapping->MapKey(MoveAction, EKeys::A).Modifiers.Add(Negate());
+	Mapping->MapKey(MoveAction, EKeys::D);
+	Mapping->MapKey(LookAction, EKeys::Mouse2D);
+	Mapping->MapKey(FireAction, EKeys::LeftMouseButton);
+	Mapping->MapKey(JumpAction, EKeys::SpaceBar);
+	Mapping->MapKey(CrouchAction, EKeys::LeftControl);
+	Mapping->MapKey(WalkAction, EKeys::LeftShift);
+	Mapping->MapKey(ReloadAction, EKeys::R);
+}
+
+void ABeanPlayerController::SetupInputComponent()
+{
+	Super::SetupInputComponent();
+	BuildInput();
+	UEnhancedInputComponent* Input = Cast<UEnhancedInputComponent>(InputComponent);
+	if (!Input)
+	{
+		UE_LOG(LogFPSAgent, Error, TEXT("Enhanced Input is not active: check Config/DefaultInput.ini"));
+		return;
+	}
+	Input->BindAction(MoveAction, ETriggerEvent::Triggered, this, &ABeanPlayerController::OnMove);
+	Input->BindAction(LookAction, ETriggerEvent::Triggered, this, &ABeanPlayerController::OnLook);
+	Input->BindAction(FireAction, ETriggerEvent::Started, this, &ABeanPlayerController::OnFirePressed);
+	Input->BindAction(FireAction, ETriggerEvent::Completed, this, &ABeanPlayerController::OnFireReleased);
+	Input->BindAction(JumpAction, ETriggerEvent::Started, this, &ABeanPlayerController::OnJumpPressed);
+	Input->BindAction(JumpAction, ETriggerEvent::Completed, this, &ABeanPlayerController::OnJumpReleased);
+	Input->BindAction(CrouchAction, ETriggerEvent::Started, this, &ABeanPlayerController::OnCrouchPressed);
+	Input->BindAction(CrouchAction, ETriggerEvent::Completed, this, &ABeanPlayerController::OnCrouchReleased);
+	Input->BindAction(WalkAction, ETriggerEvent::Started, this, &ABeanPlayerController::OnWalkPressed);
+	Input->BindAction(WalkAction, ETriggerEvent::Completed, this, &ABeanPlayerController::OnWalkReleased);
+	Input->BindAction(ReloadAction, ETriggerEvent::Started, this, &ABeanPlayerController::OnReload);
+}
+
+void ABeanPlayerController::BeginPlay()
+{
+	Super::BeginPlay();
+	BuildInput();
+	if (ULocalPlayer* LocalPlayer = GetLocalPlayer())
+	{
+		if (UEnhancedInputLocalPlayerSubsystem* Subsystem = ULocalPlayer::GetSubsystem<UEnhancedInputLocalPlayerSubsystem>(LocalPlayer))
+		{
+			Subsystem->AddMappingContext(Mapping, 0);
+		}
+	}
+	SetInputMode(FInputModeGameOnly());
+	SetShowMouseCursor(false);
+}
+
+ABeanCharacter* ABeanPlayerController::GetBean() const
+{
+	return Cast<ABeanCharacter>(GetPawn());
+}
+
+void ABeanPlayerController::OnMove(const FInputActionValue& Value)
+{
+	ABeanCharacter* Bean = GetBean();
+	if (!Bean)
+	{
+		return;
+	}
+	const FVector2D Axis = Value.Get<FVector2D>();
+	const FRotationMatrix Yaw(FRotator(0.f, GetControlRotation().Yaw, 0.f));
+	Bean->AddMovementInput(Yaw.GetUnitAxis(EAxis::X), Axis.Y);
+	Bean->AddMovementInput(Yaw.GetUnitAxis(EAxis::Y), Axis.X);
+}
+
+void ABeanPlayerController::OnLook(const FInputActionValue& Value)
+{
+	const FVector2D Delta = Value.Get<FVector2D>() * UFPSAgentSettings::Get().MouseDegreesPerCount;
+	FRotator Rotation = GetControlRotation();
+	Rotation.Yaw += Delta.X;
+	Rotation.Pitch = FMath::Clamp(FRotator::NormalizeAxis(Rotation.Pitch + Delta.Y), -89.f, 89.f);
+	SetControlRotation(Rotation);
+}
+
+void ABeanPlayerController::OnFirePressed()   { if (ABeanCharacter* B = GetBean()) { B->GetRifle()->SetTriggerHeld(true); } }
+void ABeanPlayerController::OnFireReleased()  { if (ABeanCharacter* B = GetBean()) { B->GetRifle()->SetTriggerHeld(false); } }
+void ABeanPlayerController::OnJumpPressed()   { if (ABeanCharacter* B = GetBean()) { B->Jump(); } }
+void ABeanPlayerController::OnJumpReleased()  { if (ABeanCharacter* B = GetBean()) { B->StopJumping(); } }
+void ABeanPlayerController::OnCrouchPressed() { if (ABeanCharacter* B = GetBean()) { B->Crouch(); } }
+void ABeanPlayerController::OnCrouchReleased(){ if (ABeanCharacter* B = GetBean()) { B->UnCrouch(); } }
+void ABeanPlayerController::OnWalkPressed()   { if (ABeanCharacter* B = GetBean()) { B->SetWalking(true); } }
+void ABeanPlayerController::OnWalkReleased()  { if (ABeanCharacter* B = GetBean()) { B->SetWalking(false); } }
+void ABeanPlayerController::OnReload()        { if (ABeanCharacter* B = GetBean()) { B->GetRifle()->RequestReload(); } }
+
+void ABeanPlayerController::ShowHitboxes(bool bShow)
+{
+	for (TActorIterator<ABeanCharacter> It(GetWorld()); It; ++It)
+	{
+		It->SetHitboxesVisible(bShow);
+	}
+}
+```
+`Source/FPSAgent/Arena/BeanHUD.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/HUD.h"
+#include "BeanHUD.generated.h"
+
+class ABeanCharacter;
+struct FShotResult;
+
+/** Play-testing HUD: crosshair (gap grows with spread), HP/armor/ammo/speed/spread, hit markers. */
+UCLASS()
+class FPSAGENT_API ABeanHUD : public AHUD
+{
+	GENERATED_BODY()
+
+public:
+	virtual void DrawHUD() override;
+
+private:
+	void HandleShot(const FShotResult& Shot);
+
+	TWeakObjectPtr<ABeanCharacter> BoundBean;
+	FString LastHitText;
+	double LastHitTime = -100.0;
+};
+```
+`Source/FPSAgent/Arena/BeanHUD.cpp`:
+```cpp
+#include "Arena/BeanHUD.h"
+#include "Character/BeanCharacter.h"
+#include "Character/HealthComponent.h"
+#include "Engine/Canvas.h"
+#include "Weapons/RifleComponent.h"
+
+void ABeanHUD::DrawHUD()
+{
+	Super::DrawHUD();
+	if (!Canvas)
+	{
+		return;
+	}
+	ABeanCharacter* Bean = Cast<ABeanCharacter>(GetOwningPawn());
+	if (Bean != BoundBean.Get())
+	{
+		if (ABeanCharacter* Old = BoundBean.Get())
+		{
+			Old->GetRifle()->OnShotFired.RemoveAll(this);
+		}
+		BoundBean = Bean;
+		if (Bean)
+		{
+			Bean->GetRifle()->OnShotFired.AddUObject(this, &ABeanHUD::HandleShot);
+		}
+	}
+
+	const float CX = Canvas->ClipX * 0.5f;
+	const float CY = Canvas->ClipY * 0.5f;
+	const float Spread = Bean ? Bean->GetRifle()->GetCurrentSpreadDegrees() : 0.f;
+	const float Gap = 4.f + Spread * 6.f;
+	const FLinearColor Green(0.1f, 1.f, 0.3f);
+	DrawLine(CX - Gap - 8.f, CY, CX - Gap, CY, Green, 2.f);
+	DrawLine(CX + Gap, CY, CX + Gap + 8.f, CY, Green, 2.f);
+	DrawLine(CX, CY - Gap - 8.f, CX, CY - Gap, Green, 2.f);
+	DrawLine(CX, CY + Gap, CX, CY + Gap + 8.f, Green, 2.f);
+
+	if (Bean)
+	{
+		const FRifleFireState& Fire = Bean->GetRifle()->GetFireState();
+		DrawText(FString::Printf(TEXT("HP %.0f   ARMOR %.0f   AMMO %d%s   SPEED %.0f   SPREAD %.2f deg"),
+			Bean->GetHealth()->GetHealth(), Bean->GetHealth()->GetArmor(), Fire.Ammo,
+			Fire.IsReloading() ? TEXT(" (reloading)") : TEXT(""), Bean->GetHorizontalSpeed(), Spread),
+			FLinearColor::White, 20.f, Canvas->ClipY - 40.f);
+	}
+	if (GetWorld()->GetTimeSeconds() - LastHitTime < 0.6)
+	{
+		DrawText(LastHitText, FLinearColor::Red, CX + 20.f, CY + 20.f);
+	}
+}
+
+void ABeanHUD::HandleShot(const FShotResult& Shot)
+{
+	if (Shot.Zone == EHitZone::None)
+	{
+		return;
+	}
+	LastHitText = FString::Printf(TEXT("%s %.0f%s"), *UEnum::GetDisplayValueAsText(Shot.Zone).ToString(), Shot.Damage, Shot.bKill ? TEXT("  KILL") : TEXT(""));
+	LastHitTime = GetWorld()->GetTimeSeconds();
+}
+```
+`Source/FPSAgent/Arena/RangeGameMode.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/GameModeBase.h"
+#include "Arena/ArenaBuilder.h"
+#include "RangeGameMode.generated.h"
+
+class APlayerStart;
+
+/** Shooting range built at runtime (works on the empty Entry map and headless). */
+UCLASS()
+class FPSAGENT_API ARangeGameMode : public AGameModeBase
+{
+	GENERATED_BODY()
+
+public:
+	ARangeGameMode();
+	virtual void InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage) override;
+	virtual AActor* ChoosePlayerStart_Implementation(AController* Player) override;
+
+protected:
+	FPSArena::FRangeLayout Layout;
+
+private:
+	UPROPERTY() TObjectPtr<APlayerStart> PlayerStart;
+};
+```
+`Source/FPSAgent/Arena/RangeGameMode.cpp`:
+```cpp
+#include "Arena/RangeGameMode.h"
+#include "Arena/BeanHUD.h"
+#include "Character/BeanCharacter.h"
+#include "Character/BeanPlayerController.h"
+#include "Common/FPSAgentSettings.h"
+#include "Common/FPSRunArgs.h"
+#include "Engine/World.h"
+#include "FPSAgent.h"
+#include "GameFramework/PlayerStart.h"
+
+ARangeGameMode::ARangeGameMode()
+{
+	DefaultPawnClass = ABeanCharacter::StaticClass();
+	PlayerControllerClass = ABeanPlayerController::StaticClass();
+	HUDClass = ABeanHUD::StaticClass();
+}
+
+void ARangeGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
+{
+	Super::InitGame(MapName, Options, ErrorMessage);
+	UE_LOG(LogFPSAgent, Log, TEXT("RangeGameMode: %s"), *FFPSRunArgs::Get().ToString());
+
+	UWorld* World = GetWorld();
+	Layout = FPSArena::BuildRange(World, UFPSAgentSettings::Get().Range, FVector::ZeroVector);
+	FPSArena::SpawnPreviewLighting(World);
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	PlayerStart = World->SpawnActor<APlayerStart>(Layout.PlayerStart.GetLocation(), Layout.PlayerStart.Rotator(), Params);
+}
+
+AActor* ARangeGameMode::ChoosePlayerStart_Implementation(AController* Player)
+{
+	return PlayerStart ? PlayerStart.Get() : Super::ChoosePlayerStart_Implementation(Player);
+}
+```
+
+- [ ] **Step 5: Build and test.** Expected: 19 succeeded, 0 failed.
+
+- [ ] **Step 6: Play-in-editor check through MCP**
+
+Run, in order:
+```bash
+unreal-mcp-cli open Game/FPSAgent --headless
+unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StartPlay()"}'
+unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call AdvancePlay(1.0, 0, \"W\")"}'
+unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call AdvancePlay(1.0, 0, \"W, LeftShift\")"}'
+unreal-mcp-cli run-tool rql-query -p Game/FPSAgent --input '{"query":"console | where Verbosity == \"Error\""}'
+unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StopPlay()"}'
+unreal-mcp-cli close Game/FPSAgent --owned-only
+```
+Expected:
+- The first AdvancePlay reports a horizontal velocity of about 540 (±5) and the pawn moved forward.
+- The walk AdvancePlay reports about 300.
+- The console error query shows no `LogFPSAgent` errors (in particular, no "Enhanced Input is not active").
+
+If AdvancePlay reports no movement: confirm the RangeGameMode log line appears, and that the pawn is an `ABeanCharacter`.
+
+- [ ] **Step 7: Commit**
+```bash
+git add Game/FPSAgent/Source Game/FPSAgent/Config
+git commit -m "[local] Playable range: code-built Enhanced Input, HUD, runtime arena, RangeGameMode" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 9: Range bots (static + strafe) with respawn
+
+**Files:**
+- Create: `Source/FPSAgent/Bots/StrafeLogic.h/.cpp`, `Bots/RangeBot.h/.cpp`, `Tests/StrafeLogicTests.cpp`
+- Modify: `Source/FPSAgent/Arena/RangeGameMode.h/.cpp` (spawn bots in `StartPlay`)
+
+**Interfaces:**
+- Consumes: `FRangeSettings`, `ABeanCharacter`, `ARangeGameMode::Layout`
+- Produces:
+  - `struct FStrafeState { float Direction; double NextFlipTime; }`
+  - `float UpdateStrafe(FStrafeState&, double Now, float LateralOffsetCm, const FRangeSettings&, const FRandomStream&)`
+  - `ARangeBot::InitBot(ERangeBotMode, int32 Seed)`
+
+- [ ] **Step 1: Write the failing test** in `Source/FPSAgent/Tests/StrafeLogicTests.cpp`:
+```cpp
+#include "Misc/AutomationTest.h"
+#include "Bots/StrafeLogic.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSStrafeLogicTest, "FPSAgent.Bots.Strafe",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSStrafeLogicTest::RunTest(const FString& Parameters)
+{
+	FRangeSettings Range; // half width 300, period 0.35..1.1
+	const FRandomStream Rng(99);
+	FStrafeState S;
+	TestEqual(TEXT("starts moving right"), UpdateStrafe(S, 0.0, 0.f, Range, Rng), 1.f);
+	TestTrue(TEXT("flip scheduled in range"), S.NextFlipTime >= 0.35 && S.NextFlipTime <= 1.1);
+	TestEqual(TEXT("keeps direction before flip"), UpdateStrafe(S, 0.2, 50.f, Range, Rng), 1.f);
+	TestEqual(TEXT("flips at schedule"), UpdateStrafe(S, S.NextFlipTime, 60.f, Range, Rng), -1.f);
+
+	FStrafeState Edge;
+	UpdateStrafe(Edge, 0.0, 0.f, Range, Rng);
+	TestEqual(TEXT("bounces off the right edge"), UpdateStrafe(Edge, 0.1, 350.f, Range, Rng), -1.f);
+	TestEqual(TEXT("no double flip while returning"), UpdateStrafe(Edge, 0.15, 340.f, Range, Rng), -1.f);
+
+	const FRandomStream RngA(5), RngB(5);
+	FStrafeState A, B;
+	UpdateStrafe(A, 0.0, 0.f, Range, RngA);
+	UpdateStrafe(B, 0.0, 0.f, Range, RngB);
+	TestEqual(TEXT("deterministic schedule"), A.NextFlipTime, B.NextFlipTime);
+	return true;
+}
+
+#endif
+```
+
+- [ ] **Step 2: Build to confirm it fails.** Expected: `Bots/StrafeLogic.h` not found.
+
+- [ ] **Step 3: Implement.** `Source/FPSAgent/Bots/StrafeLogic.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Common/FPSAgentTypes.h"
+
+struct FStrafeState
+{
+	float Direction = 1.f;
+	/** < 0: first update schedules it. */
+	double NextFlipTime = -1.0;
+};
+
+/** ADAD strafing: returns lateral input (+1 right / -1 left). Flips on a random schedule and when past the lane half-width. */
+FPSAGENT_API float UpdateStrafe(FStrafeState& State, double Now, float LateralOffsetCm, const FRangeSettings& Range, const FRandomStream& Rng);
+```
+`Source/FPSAgent/Bots/StrafeLogic.cpp`:
+```cpp
+#include "Bots/StrafeLogic.h"
+
+float UpdateStrafe(FStrafeState& State, double Now, float LateralOffsetCm, const FRangeSettings& Range, const FRandomStream& Rng)
+{
+	auto Schedule = [&]() { State.NextFlipTime = Now + Rng.FRandRange(Range.StrafeMinPeriod, Range.StrafeMaxPeriod); };
+	if (State.NextFlipTime < 0.0)
+	{
+		Schedule();
+		return State.Direction;
+	}
+	const bool bPastRight = LateralOffsetCm > Range.StrafeHalfWidthCm && State.Direction > 0.f;
+	const bool bPastLeft = LateralOffsetCm < -Range.StrafeHalfWidthCm && State.Direction < 0.f;
+	if (bPastRight || bPastLeft || Now >= State.NextFlipTime)
+	{
+		State.Direction = -State.Direction;
+		Schedule();
+	}
+	return State.Direction;
+}
+```
+`Source/FPSAgent/Bots/RangeBot.h`:
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "Character/BeanCharacter.h"
+#include "Bots/StrafeLogic.h"
+#include "RangeBot.generated.h"
+
+class UHealthComponent;
+
+/** Range target: stands still or ADAD-strafes along its lane; respawns at home after death. Does not shoot (yet). */
+UCLASS()
+class FPSAGENT_API ARangeBot : public ABeanCharacter
+{
+	GENERATED_BODY()
+
+public:
+	ARangeBot(const FObjectInitializer& ObjectInitializer);
+
+	void InitBot(ERangeBotMode InMode, int32 Seed);
+	virtual void Tick(float DeltaSeconds) override;
+
+protected:
+	virtual void BeginPlay() override;
+
+private:
+	void HandleDied(UHealthComponent* Victim, AActor* Killer);
+	void Respawn();
+
+	ERangeBotMode Mode = ERangeBotMode::Static;
+	FTransform Home;
+	FStrafeState Strafe;
+	FRandomStream Rng;
+	FTimerHandle RespawnTimer;
+};
+```
+`Source/FPSAgent/Bots/RangeBot.cpp`:
+```cpp
+#include "Bots/RangeBot.h"
+#include "AIController.h"
+#include "Camera/CameraComponent.h"
+#include "Character/HealthComponent.h"
+#include "Common/FPSAgentSettings.h"
+#include "Engine/World.h"
+#include "TimerManager.h"
+#include "Weapons/RifleComponent.h"
+
+ARangeBot::ARangeBot(const FObjectInitializer& ObjectInitializer)
+	: Super(ObjectInitializer)
+{
+	PrimaryActorTick.bCanEverTick = true;
+	AutoPossessAI = EAutoPossessAI::PlacedInWorldOrSpawned;
+	AIControllerClass = AAIController::StaticClass();
+	bUseControllerRotationYaw = false; // keep facing down the lane
+	Camera->SetAutoActivate(false);
+}
+
+void ARangeBot::BeginPlay()
+{
+	Super::BeginPlay();
+	Home = GetActorTransform();
+	GetHealth()->OnDied.AddUObject(this, &ARangeBot::HandleDied);
+}
+
+void ARangeBot::InitBot(ERangeBotMode InMode, int32 Seed)
+{
+	Mode = InMode;
+	Rng.Initialize(Seed);
+	GetRifle()->SeedRandom(Seed);
+}
+
+void ARangeBot::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (Mode != ERangeBotMode::Strafe || GetHealth()->IsDead())
+	{
+		return;
+	}
+	const FVector Right = Home.GetRotation().GetRightVector();
+	const float Offset = FVector::DotProduct(GetActorLocation() - Home.GetLocation(), Right);
+	const float Input = UpdateStrafe(Strafe, GetWorld()->GetTimeSeconds(), Offset, UFPSAgentSettings::Get().Range, Rng);
+	AddMovementInput(Right, Input);
+}
+
+void ARangeBot::HandleDied(UHealthComponent* Victim, AActor* Killer)
+{
+	SetDeadState(true);
+	GetWorldTimerManager().SetTimer(RespawnTimer, this, &ARangeBot::Respawn, UFPSAgentSettings::Get().Range.BotRespawnDelay, false);
+}
+
+void ARangeBot::Respawn()
+{
+	SetActorTransform(Home, false, nullptr, ETeleportType::TeleportPhysics);
+	GetHealth()->ResetToFull();
+	Strafe = FStrafeState();
+	SetDeadState(false);
+}
+```
+In `Source/FPSAgent/Arena/RangeGameMode.h`, add this public declaration below `ChoosePlayerStart_Implementation`:
+```cpp
+	virtual void StartPlay() override;
+```
+In `Source/FPSAgent/Arena/RangeGameMode.cpp`, add `#include "Bots/RangeBot.h"` and append:
+```cpp
+void ARangeGameMode::StartPlay()
+{
+	Super::StartPlay();
+	const FRangeSettings& Range = UFPSAgentSettings::Get().Range;
+	const int32 BaseSeed = FFPSRunArgs::Get().Seed;
+	for (int32 i = 0; i < Layout.BotSpawns.Num() && i < Range.Lanes.Num(); ++i)
+	{
+		FActorSpawnParameters Params;
+		Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
+		const FTransform& Spawn = Layout.BotSpawns[i];
+		if (ARangeBot* Bot = GetWorld()->SpawnActor<ARangeBot>(Spawn.GetLocation(), Spawn.Rotator(), Params))
+		{
+			Bot->InitBot(Range.Lanes[i].Mode, BaseSeed * 1000 + i);
+		}
+	}
+}
+```
+
+- [ ] **Step 4: Build and test.** Expected: 20 succeeded, 0 failed.
+
+- [ ] **Step 5: Play-in-editor check through MCP**
+```bash
+unreal-mcp-cli open Game/FPSAgent --headless
+unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StartPlay()"}'
+unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call AdvancePlay(2.0, 0, \"\")"}'
+unreal-mcp-cli run-tool rql-query -p Game/FPSAgent --input '{"query":"actors | where $ is RangeBot | select Label Location"}'
+unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StopPlay()"}'
+unreal-mcp-cli close Game/FPSAgent --owned-only
+```
+Expected:
+- 5 RangeBot rows.
+- The bots on lanes 1 and 3 (Strafe) have a Y location away from their lane's `LateralCm` (moved).
+- The bots on lanes 0, 2 and 4 (Static) are exactly at their lane positions.
+
+If the RQL syntax is rejected, run `unreal-mcp-cli run-tool rql-schema -p Game/FPSAgent --input '{"query":"actors"}'` and adapt the query.
+
+- [ ] **Step 6: Commit**
+```bash
+git add Game/FPSAgent/Source
+git commit -m "[local] Range bots: static + ADAD strafe with respawn, spawned per lane" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
+
+---
+
+### Task 10: Docs handoff
+
+**Files:**
+- Modify: `README.md` (Windows dev setup: build/test commands; Maps: runtime geometry), `docs/decisions.md`, `docs/STATUS.md`, `CLAUDE.md` (Testing section commands)
+
+- [ ] **Step 1: README.** In **Windows dev setup**, add:
+```markdown
+### Build and test (editor closed)
+- Build: `powershell -File tools/build.ps1`
+- Tests (headless, -nullrhi): `powershell -File tools/run_tests.ps1` (prints each test, exit 0 = all passed)
+- Play-test: open the editor, press Play. WASD move, mouse look, LMB fire, Shift walk, Ctrl crouch, Space jump, R reload. Console: `ShowHitboxes 1`.
+- Tuning: Project Settings > Game > FPS Agent (saved to `Game/FPSAgent/Config/DefaultGame.ini`).
+```
+In **Maps → Pipeline**, replace item 4 with:
+```markdown
+4. **Runtime builder (C++).** `FPSArena` spawns level geometry from data when the game starts, in the editor and headless on Cradle alike, so procedural variants need no rebuild or `.umap`. Unreal-MCP is used to preview, play-test and screenshot levels in the editor.
+```
+
+- [ ] **Step 2: docs/decisions.md.** Append:
+```markdown
+| D-011 | 2026-11-11 | Level geometry (range, later maps) is **spawned at runtime from data in C++**, not authored as `.umap` | Same code path in editor and headless Cradle; per-episode procedural variants need no repackaging; no LFS assets. MCP is used for preview/play-test. |
+| D-012 | 2026-11-11 | Mechanics tuning lives in `UFPSAgentSettings` (text config, `DefaultGame.ini`), not DataAsset `.uasset`s | Diffable, mergeable, readable by both sides of the repo. |
+```
+
+- [ ] **Step 3: docs/STATUS.md.**
+  - Set L-002 Status to `done`, with Answer: `Not needed: the cluster already has GitHub access (user, 2026-11-11)`.
+  - Update **Current focus → LOCAL** to: `Plan 1 (core sandbox) done: bean characters, rifle, range + bots. Next: Plan 2 (original blockout maps from JSON specs).`
+  - Update the `_Last updated` line.
+
+- [ ] **Step 4: CLAUDE.md.** In **Testing and verification**, add the line:
+```markdown
+- **Commands (LOCAL):** `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1` (editor closed). For PIE checks: `unreal-mcp-cli open Game/FPSAgent --headless` + `unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StartPlay()"}'`, and close with `unreal-mcp-cli close Game/FPSAgent --owned-only`.
+```
+
+- [ ] **Step 5: Commit**
+```bash
+git add README.md CLAUDE.md docs/decisions.md docs/STATUS.md
+git commit -m "[local] Docs: build/test workflow, runtime-geometry and settings decisions, status" -m "Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>"
+git pull --rebase && git push
+```
