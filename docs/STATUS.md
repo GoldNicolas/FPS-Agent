@@ -5,7 +5,11 @@ The mailbox between the **LOCAL** side (Windows: game, builds) and the **CLUSTER
 _Last updated: 2026-11-11 by LOCAL_
 
 ## Current focus
-- **LOCAL:** Plan 1 (core sandbox) **done**: bean characters, rifle, health/armor, runtime-built range + static/strafe bots, 20/20 tests headless, verified in PIE via MCP. Next: Plan 2 (original blockout maps from JSON specs). Then the Linux target + v26 toolchain + Learning Agents Python copy for Spike A.
+- **LOCAL:** Plans 1 + 2 **done**.
+  - Sandbox: beans, rifle, health/armor, range + bots.
+  - Maps: original `map01` with elevation, plus a 50-map validated pool, all built at runtime from JSON. Choose with `-Map=range|map01|gen_007|pool`.
+  - Tests: 27 C++ (headless) + 18 Python; verified in PIE via MCP.
+  - Next: Linux target + v26 toolchain + Learning Agents Python copy, then the Spike A toy build.
 - **CLUSTER:** Recon (L-001) and Spike E (L-003). Nothing to run from LOCAL yet: no Linux build has been published.
 
 ## Latest build

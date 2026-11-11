@@ -4,7 +4,13 @@ Train reinforcement-learning agents to move and shoot in a low-fidelity tactical
 
 The agents ("beans with guns") learn by trial and error (PPO) **only against scripted bots**. After training, a **deathmatch field test** pits the trained agents against each other on a full map to show how they perform. The long-term goal is to turn the trained policies into an in-game bot mechanic with tunable difficulty.
 
-> **Status (2026-11-11):** Core sandbox done (Plan 1, [`docs/superpowers/plans/2026-11-11-core-sandbox.md`](docs/superpowers/plans/2026-11-11-core-sandbox.md)): bean characters, Valorant-like movement, hitscan rifle (damage per hitbox, spread, recoil, cadence, reload), health + armor, and a runtime-built shooting range with static and strafing bots. 20 automation tests pass headless (`-nullrhi`), and it was verified in play-in-editor through Unreal-MCP. Next: Plan 2 (original blockout maps from JSON specs) and Phase 0 spikes. **The live state of both sides is in [`docs/STATUS.md`](docs/STATUS.md).**
+> **Status (2026-11-11):**
+> - **Plan 1 (core sandbox) is done:** bean characters, Valorant-like movement, a hitscan rifle (damage per hitbox, spread, recoil, cadence, reload), health + armor, and a runtime-built shooting range with bots.
+> - **Plan 2 (maps) is done:** an original blockout map `map01` with elevation, plus a 50-map validated procedural pool, all built at runtime from JSON specs ([plans](docs/superpowers/plans/)).
+> - **Tests:** 27 C++ tests pass headless (`-nullrhi`) and 18 Python tests pass. Both plans were verified in play-in-editor through Unreal-MCP.
+> - **Next:** Phase 0 spikes (Linux build → Cradle).
+>
+> **The live state of both sides is in [`docs/STATUS.md`](docs/STATUS.md).**
 
 ---
 
@@ -54,8 +60,8 @@ The agents ("beans with guns") learn by trial and error (PPO) **only against scr
 │      │                 (RQL, C++ source+compile, python-execute)     │
 │      │                                                               │
 │      ├── edits C++ (Source/) ──► compile                             │
-│      ├── maps/specs/*.json ──► tools/mapgen builder (python-execute) │
-│      │                          ──► levels (.umap)                   │
+│      ├── tools/mapgen (Python) ──► Content/MapSpecs/*.json           │
+│      │     (validate, generate, preview) ──► built at runtime in C++ │
 │      └── tools/package_linux ──► cross-compile (v26 toolchain)       │
 │                                   ──► Linux build (tarball)          │
 └───────────────────────────────────────┬──────────────────────────────┘
@@ -114,17 +120,20 @@ FPS-Agent/
 ├── Game/FPSAgent/             # UE 5.7 C++ project (FPSAgent.uproject)
 │   ├── Source/FPSAgent/
 │   │   ├── Character/         # ABeanCharacter, movement tuning, hitboxes
-│   │   ├── Weapons/           # hitscan rifle, URifleStats DataAsset, recoil/spread
-│   │   ├── Bots/              # scripted range bots, behaviors, difficulty
-│   │   ├── Arena/             # arena instances, spawn zones, episode reset, randomization, seeds
-│   │   ├── Learning/          # Learning Agents manager/interactor/environment/trainer setup
-│   │   └── Eval/              # deathmatch game mode, metrics logging
-│   ├── Config/                # DefaultEngine.ini, DefaultGame.ini
-│   └── Content/Data/          # DataAssets / DataTables (mechanics values)
-├── maps/specs/                # JSON map layout specs (source of truth for levels)
+│   │   ├── Common/            # UFPSAgentSettings (all tuning), run args, shared types
+│   │   ├── Weapons/           # hitscan rifle, combat math, fire-state machine
+│   │   ├── Bots/              # scripted range bots (static/strafe), later more behaviors
+│   │   ├── Arena/             # ArenaGameMode, range + map builders, FMapSpec, HUD
+│   │   ├── Learning/          # (next) Learning Agents manager/interactor/environment
+│   │   ├── Eval/              # (later) deathmatch game mode, metrics logging
+│   │   └── Tests/             # automation tests (run headless)
+│   ├── Config/                # DefaultEngine.ini, DefaultGame.ini (tuning), DefaultInput.ini
+│   └── Content/MapSpecs/      # map01.json, gen_###.json, pool.json (staged into builds)
+├── environment.yml            # conda env fps-agent (Python tools)
 ├── tools/
-│   ├── mapgen/                # spec validator, procedural generator, in-editor builder
-│   └── package_linux.ps1      # RunUAT BuildCookRun wrapper for Linux
+│   ├── build.ps1 / run_tests.ps1  # build editor target; run tests headless
+│   ├── mapgen/                # map format, validator, generator, previews (+ maps/map01.py)
+│   └── package_linux.ps1      # (next) RunUAT BuildCookRun wrapper for Linux
 ├── cluster/
 │   ├── env/                   # Miniforge env setup for the trainer
 │   ├── learning_agents_python/  # Learning Agents + NNE Python copied from the engine, version-pinned
@@ -212,16 +221,77 @@ Difficulty settings are reaction time, aim error (degrees), tracking speed, burs
 
 This is also better for RL. Randomized original layouts keep the agent from memorizing a single map.
 
+### Current maps
+| Map | What | Preview |
+|---|---|---|
+| `map01` | Hand-designed original, 120 m (30×30 tiles of 4 m). Site A is a raised plaza with a level-2 perch and 3 ramps. Site B is a courtyard with a balcony. Mid has a raised box. Three lanes with doglegs, plus a back alley. Source: `tools/mapgen/maps/map01.py`. | [docs/maps/map01.png](docs/maps/map01.png) |
+| `gen_000`…`gen_049` | Procedural pool from an original 3-lane template, with jitter, raised sites or balconies, perches, a mid box and cover. All 50 pass validation. Listed in `pool.json`. | [docs/maps/pool_sheet.png](docs/maps/pool_sheet.png) (first 12) |
+
+### Format v1 (`Game/FPSAgent/Content/MapSpecs/<name>.json`)
+```json
+{ "format": 1, "name": "map01", "tile_cm": 400, "level_cm": 100, "wall_cm": 600,
+  "tiles": ["####...", ...], "heights": ["0000...", ...], "zones": ["....", ...] }
+```
+- **Grids:** three equal-size character grids.
+- **Coordinates:** row 0 is **north (+X)**, and column 0 is west (+Y points east). The center of tile (r, c) is at `X=(rows-1-r+0.5)*tile`, `Y=(c+0.5)*tile`.
+- **`tiles` characters:**
+
+  | Char | Meaning |
+  |---|---|
+  | `.` | Floor |
+  | `#` | Wall (up to `wall_cm`) |
+  | `l` | Low cover, 120 cm (shoot over it standing; a crouched head hides behind it) |
+  | `h` | High cover, 250 cm |
+  | `x` | Void |
+  | `^` `v` `>` `<` | Ramp rising one level to the north / south / east / west |
+
+- **`heights`:** floor level `0`–`9`, in steps of `level_cm` (1 m). For a ramp, it's the level of its low end. A 1 m step is too tall to jump (the jump apex is about 0.9 m), so ramps are the only way up. Drops are one-way.
+- **`zones`:**
+
+  | Char | Meaning |
+  |---|---|
+  | `a` | Attacker spawn |
+  | `d` | Defender spawn |
+  | `A` `B` `C` | Sites (C optional) |
+  | `m` | Mid |
+  | `.` | No zone |
+
+### Validation rules (`tools/mapgen/mapgen/validate.py`)
+1. **dims:** grids have equal sizes, at least 8×8.
+2. **chars:** only legal characters.
+3. **border:** the edge is closed.
+4. **ramps:** each ramp's low end is at level h and its high end at h+1.
+5. **zones:** spawns have at least 4 floor tiles; A, B and mid have at least 9 walkable tiles each.
+6. **connectivity:** all walkable tiles form **one strongly connected component**, so no area is a one-way trap after a drop.
+7. **spawn_los:** no line of sight between the two spawns. Lines of sight are checked in 2.5D: eyes at 158 cm, with cover and elevation counted.
+8. **sightlines:** among visible pairs within 50 m, at least 20% are close (< 10 m), at least 25% are mid (10–25 m), and long (25–50 m) is between 3% and 30%. These targets are tunable; how they were calibrated is in the code comment.
+
 ### Pipeline
-1. **JSON layout spec** (`maps/specs/<name>.json`) is the source of truth. It lists a grid or polygon blockout of floors, walls, boxes and ramps, plus tagged regions: `site_a`, `mid`, `spawn_zone_*`, `choke_*`.
-2. **Validator** (`tools/mapgen`) checks each spec before it is built:
-   - every region is reachable,
-   - the site count is right,
-   - spawn zones are not in line of sight of each other,
-   - the sightline-length histogram falls inside the target bands.
-3. **Procedural generator** produces randomized variant specs from templates (lane count, site shape, cover density).
-4. **Runtime builder (C++).** `FPSArena` spawns level geometry from data when the game starts, in the editor and headless on Cradle alike, so procedural variants need no rebuild or `.umap` (decision D-011). The shooting range already works this way.
-5. **Unreal-MCP's role:** preview, play-test (`StartPlay` / `AdvancePlay`) and screenshot levels in the editor, and inspect actors with RQL.
+1. **Python (`tools/mapgen`)** handles authoring, generation, validation and previews. Run it with `conda run -n fps-agent python -m mapgen ...` from `tools/mapgen`:
+   ```bash
+   conda run -n fps-agent python -m maps.map01                                   # rebuild map01.json from its script
+   conda run -n fps-agent python -m mapgen validate ../../Game/FPSAgent/Content/MapSpecs/*.json
+   conda run -n fps-agent python -m mapgen preview  <files> --out ../../docs/maps
+   conda run -n fps-agent python -m mapgen generate --count 50 --seed 0 --out ../../Game/FPSAgent/Content/MapSpecs --sheet ../../docs/maps/pool_sheet.png
+   conda run -n fps-agent python -m pytest -q
+   ```
+   Always use `conda run`. Calling the env's `python.exe` directly crashes in numpy/matplotlib, because of a DLL conflict with msys/Git entries on PATH.
+2. **Runtime builder (C++)** (decision D-011):
+   - `FMapSpec` parses the same JSON.
+   - `FPSArena::ComputeMapBlocks` merges tiles into about 100 gray blocks: greedy rectangles, cover boxes, and pitched ramp slabs.
+   - `BuildMap` spawns them, in the editor and headless on Cradle alike.
+   - Specs ship inside the build (`Content/MapSpecs` is staged as UFS), so new variants need no `.umap` and no repackaging of content.
+3. **Choosing the arena** (`AArenaGameMode`). The order of precedence is `-Map=` on the command line, then the `fps.PlayMap` console variable, then Project Settings → FPS Agent → Map → PlayMap. The values are:
+
+   | Value | Arena |
+   |---|---|
+   | `range` (or empty) | The shooting range |
+   | `map01` / `gen_007` | That spec |
+   | `pool` | A random pool map, picked by seed |
+
+   On a map, the player starts on a random attacker spawn and `BotCount` range bots stand on random spots in the sites, mid and defender spawn.
+4. **Viewing:** `fps.TopDown 1` shows the whole arena from above, north up, and `fps.ShowHitboxes 1` draws hitboxes. These are console variables, so they also work through Unreal-MCP's console tool.
+5. **Unreal-MCP's role:** play-test (`StartPlay` / `AdvancePlay`), take screenshots, and inspect actors with RQL.
 
 ---
 
@@ -353,6 +423,8 @@ Two Claude Code sessions (and you) work in parallel: **LOCAL** on Windows (game,
   unreal-mcp-cli close Game/FPSAgent --owned-only
   ```
 - **Tuning:** Project Settings → Game → FPS Agent (saved to `Game/FPSAgent/Config/DefaultGame.ini`).
+- **Python tools:** conda env `fps-agent` from [environment.yml](environment.yml) (`conda env create -f environment.yml`). Always run through `conda run -n fps-agent ...`.
+- **Play a map:** in the editor console, type `fps.PlayMap map01` (or `pool`, or `range`), then press Play.
 - **Gotcha (UE 5.7):** `FVector`, `FVector2D` and `FRotator` hold doubles. Cast to `float` before `TestEqual(..., float, tolerance)`, or the call is ambiguous.
 - **Gotcha (spawning):** `SpawnActor` / `FinishSpawning` combine your transform with the class's default root transform. Directional lights default to about −46° pitch, which turned a −40° sun into −86°. Call `SetActorRotation` after spawning when the class has a non-identity default.
 

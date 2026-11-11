@@ -28,7 +28,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 ### Who owns what (only edit files your role owns; ask through STATUS.md otherwise)
 | Path | Owner |
 |---|---|
-| `Game/`, `tools/`, `maps/`, `cluster/learning_agents_python/`, `docs/builds.md` | LOCAL |
+| `Game/`, `tools/`, `environment.yml`, `docs/maps/`, `cluster/learning_agents_python/`, `docs/builds.md` | LOCAL |
 | `cluster/slurm/`, `cluster/env/`, `cluster/scripts/`, `cluster/sweeps/`, `docs/cradle.md`, `docs/runs/` | CLUSTER |
 | `docs/spikes/<X>.md` | Whichever side ran that spike |
 | `docs/STATUS.md` | Shared: only your own rows, and the Status/Answer cells of requests addressed to you |
@@ -83,9 +83,13 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 - Never switch to Cloud mode or sign in to ai-game.dev without the user's OK. Never commit `.env`.
 - Keep `"TargetDenyList": ["Game","Client","Server"]` on the UnrealMCP entry in `FPSAgent.uproject`. Never add `UnrealMcp*` modules to `FPSAgent.Build.cs`; that would override the deny list and pull the plugin into the Linux builds.
 - **C++:** edit files under `Source/`, then build with `powershell -File tools/build.ps1` (editor closed) and fix the reported errors before moving on. Includes are relative to the module root (`"Common/FPSAgentSettings.h"`). In UE 5.7, `FVector`, `FVector2D` and `FRotator` are double: cast to float in `TestEqual` calls.
-- **Levels:** use the `tools/mapgen` builder through `python-execute`, never hand-placed actors.
-  - The JSON spec in `maps/specs/` is the source of truth. To change a map, change the spec and rebuild.
-  - `python-execute` has a 30 s default timeout, so build large maps in chunks.
+- **Levels are data, built at runtime** (D-011). Never hand-place level actors or author `.umap` files.
+  - Specs live in `Game/FPSAgent/Content/MapSpecs/` (format v1, README → Maps).
+  - `map01.json` is generated from `tools/mapgen/maps/map01.py`, so edit the script, not the JSON. `gen_*.json` and `pool.json` come from `python -m mapgen generate`.
+  - Every spec must pass `python -m mapgen validate` before it is committed.
+  - Python always runs as `conda run -n fps-agent ...` from `tools/mapgen`. Calling `python.exe` directly crashes because of a DLL conflict on PATH.
+  - Commit the preview PNGs (`docs/maps/`) together with the maps.
+- **Console tool caveat:** Unreal-MCP's `console-run-command` runs against the **editor** world, so player-controller Exec commands never reach a play-in-editor session. Expose play-time switches as console variables (`fps.PlayMap`, `fps.TopDown`, `fps.ShowHitboxes`).
 - Use RQL (`rql-query` / `rql-mutate`) for inspecting and small edits to actors, assets and settings.
 - Screenshot tools need a GPU editor. Never put them in anything that runs headless.
 - `python-execute` and `console-run-command` can run arbitrary code (RCE-class). Keep scripts in the repo (`tools/`) so they can be reviewed; avoid long ad-hoc snippets.
@@ -100,7 +104,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 ## CLUSTER role (Cradle)
 
 - **Login-node etiquette:** only light work on the login node (git, editing, `sbatch`/`squeue`/`sacct`, conda installs, `gh`). **Never run training, game processes, or anything heavy there.** Everything runs through Slurm (`cluster/slurm/*.sbatch`, or `srun` for short tests).
-- **You cannot build the game here** (no Unreal Engine on Cradle). Don't edit `Game/`, `tools/` or `maps/`. If the game needs a change, add a `C-xxx` request with the exact error or log excerpt.
+- **You cannot build the game here** (no Unreal Engine on Cradle). Don't edit `Game/` or `tools/`. Choose arenas at runtime with `-Map=range|map01|gen_007|pool` (+ `-Seed=`). If the game needs a change, add a `C-xxx` request with the exact error or log excerpt.
 - **Get builds** with `gh release download build-<sha>` into `~/fps-agent/builds/<sha>/`, and verify with `sha256sum -c SHA256SUMS` before use.
 - **Paths:** repo at `~/fps-agent/repo`, builds at `~/fps-agent/builds/<sha>/`, run outputs at `<weka>/fps-agent/runs/<run-id>/` (exact Weka path in `docs/cradle.md`).
 - Partition names and limits come **only** from `docs/cradle.md`. If a value there is still `TBD`, measure it or ask the user; don't guess.
@@ -114,7 +118,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 
 ## Testing and verification
 - **Weapon and movement math (LOCAL):** Unreal automation tests covering damage per hitbox, spread versus speed and the threshold, a deterministic recoil sequence for a given seed, fire-rate timing, and movement speeds under the fixed timestep.
-- **Map generator (LOCAL):** `pytest` in `tools/mapgen` covering spec schema, reachability, site count, spawn-zone line-of-sight separation and sightline histogram bands.
+- **Map tools (LOCAL):** `conda run -n fps-agent python -m pytest -q` in `tools/mapgen` covers the grid movement/line-of-sight model, all 8 validation rules, `map01`, and the generator (validity, determinism, variety). C++ `FPSAgent.Map.*` tests cover parsing, blocks, ramps, loading `map01`, and world checks (floor heights, cover blocking shots).
 - **Commands (LOCAL):** `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1` (editor closed; tests run with `-nullrhi`). For play-in-editor checks: `unreal-mcp-cli open Game/FPSAgent --headless --no-build`, then `unreal-mcp-cli run-tool rql-mutate -p Game/FPSAgent --input '{"query":"editor | call StartPlay()"}'` / `AdvancePlay(seconds, 0, "W")`, then close with `unreal-mcp-cli close Game/FPSAgent --owned-only`. Only close editors the CLI started.
 - **Headless smoke test (CLUSTER):** before any long run on a new build, submit a short (about 5 min) Slurm debug job: 1–2 game processes with `-nullrhi` against the external trainer. They must connect, step, log and save a snapshot.
 - Don't call something done until it has been run. Report real output, including failures, in the docs.
