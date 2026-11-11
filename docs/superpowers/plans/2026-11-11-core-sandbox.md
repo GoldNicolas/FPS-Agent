@@ -916,7 +916,8 @@ int32 RecoverShotIndex(int32 ShotIndex, double IdleSeconds, float RecoveryTimePe
 	{
 		return ShotIndex;
 	}
-	if (RecoveryTimePerShot <= 0.f)
+	// Full recovery first: also avoids int overflow for huge idle times (e.g. the very first shot).
+	if (RecoveryTimePerShot <= 0.f || IdleSeconds >= static_cast<double>(ShotIndex) * RecoveryTimePerShot)
 	{
 		return 0;
 	}
