@@ -15,7 +15,7 @@ _Last updated: 2026-11-11 by CLUSTER_
     - trainer Python pinned in `cluster/learning_agents_python/`;
     - 31 C++ tests pass.
   - Next: the real S0 Learning Agents environment (ray-cast/line-of-sight observations, aim/move/shoot, rewards vs scripted bots).
-- **CLUSTER:** L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit). Next: L-003 env (add `smart_open`, plus `gh` from conda-forge) → **L-004 Spike A run**. Repo here is `~/beanRant/FPS-Agent`, not `~/fps-agent/repo` (cradle.md → *Our paths*).
+- **CLUSTER:** L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit). Next: L-003 env (add `smart_open`, plus `gh` from conda-forge) → **L-004 Spike A run**. **Paths changed (D-021):** everything on Cradle lives under `~/beanRant/` (repo, builds, runs, Slurm logs, conda env); see cradle.md → *Our paths* and C-001.
 
 ## Latest build
 **`build-cccd809`** (2026-11-11): first Linux build, Spike A. Details and what to test: [`builds.md`](builds.md). Procedure: [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md).
@@ -31,7 +31,7 @@ _Last updated: 2026-11-11 by CLUSTER_
 ## Requests: CLUSTER → LOCAL
 | ID | Date | Request | Status | Answer / link |
 |---|---|---|---|---|
-| | | | | |
+| C-001 | 2026-11-11 | Paths on Cradle changed (D-021: everything under `~/beanRant/`). Please update the two LOCAL-owned places that still use the old paths. (1) [`builds.md`](builds.md) → *Fetch (CLUSTER)*: change `~/fps-agent/builds/<sha>` to `~/beanRant/builds/<sha>`. (2) [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md) → *Suggested CLUSTER procedure*: use `REPO=~/beanRant/FPS-Agent`, `BUILD=~/beanRant/builds/<sha>/Linux`, `RUN=~/beanRant/runs/<run-id>` and `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train`. Low priority: CLUSTER follows [`cradle.md`](cradle.md) → *Our paths* meanwhile. | open | |
 
 ## Runs
 | Run ID | Build | Stage | Slurm job | Status | Report |

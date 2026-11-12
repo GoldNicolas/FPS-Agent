@@ -40,7 +40,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 | Code, scripts, configs, markdown, small CSVs (< 1 MB) | git |
 | Linux game builds | GitHub Release `build-<short-sha>` (see `docs/builds.md`) |
 | Trained snapshots for LOCAL to watch or evaluate | GitHub Release `run-<run-id>` (see `docs/runs/README.md`) |
-| Full snapshots, logs, TensorBoard events | Stay on Cradle (Weka). Never committed. |
+| Full snapshots, logs, TensorBoard events | Stay on Cradle (`~/beanRant/runs/`, D-021). Never committed. |
 
 ## Hard rules (do not break without the user's explicit OK)
 1. **No computer vision.** Never add camera, render-target or pixel observations. Agents perceive the world through ray casts and line-of-sight checks only.
@@ -105,8 +105,15 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 
 - **Login-node etiquette:** only light work on the login node (git, editing, `sbatch`/`squeue`/`sacct`, conda installs, `gh`). **Never run training, game processes, or anything heavy there.** Everything runs through Slurm (`cluster/slurm/*.sbatch`, or `srun` for short tests).
 - **You cannot build the game here** (no Unreal Engine on Cradle). Don't edit `Game/` or `tools/`. Choose arenas at runtime with `-Map=range|map01|gen_007|pool` (+ `-Seed=`). If the game needs a change, add a `C-xxx` request with the exact error or log excerpt.
-- **Get builds** with `gh release download build-<sha>` into `~/fps-agent/builds/<sha>/`, and verify with `sha256sum -c SHA256SUMS` before use.
-- **Paths:** repo at `~/fps-agent/repo`, builds at `~/fps-agent/builds/<sha>/`, run outputs at `<weka>/fps-agent/runs/<run-id>/` (exact Weka path in `docs/cradle.md`).
+- **Get builds** with `gh release download build-<sha>` into `~/beanRant/builds/<sha>/`, and verify with `sha256sum -c SHA256SUMS` before use.
+- **Paths (D-021): everything stays under `~/beanRant/`.**
+  - Repo: `~/beanRant/FPS-Agent`
+  - Builds: `~/beanRant/builds/<sha>/`
+  - Run outputs: `~/beanRant/runs/<run-id>/`
+  - Slurm output: `~/beanRant/logs/`
+  - Trainer env: `~/beanRant/envs/la-train`
+
+  Never write project files elsewhere. The only exception is `gh`'s login in `~/.config/gh`. Details are in `docs/cradle.md` → *Our paths*.
 - Partition names and limits come **only** from `docs/cradle.md`. If a value there is still `TBD`, measure it or ask the user; don't guess.
 - The trainer port is derived from the job ID (`40000 + SLURM_JOB_ID % 20000`). Never hard-code ports.
 - Jobs must survive time limits: save snapshots periodically, stop cleanly on `--signal=B:USR1@300`, and resume by chaining jobs (`--dependency=afterany`).

@@ -80,7 +80,7 @@ The agents ("beans with guns") learn by trial and error (PPO) **only against scr
 │        │                         └── ... N headless game processes   │
 │        │                              each = K isolated arenas       │
 │        ▼                              (1 agent + its bots each)      │
-│   snapshots/ + logs  (Weka storage)                                  │
+│   snapshots/ + logs  (~/beanRant/runs)                               │
 │                                                                      │
 │  Job arrays: seeds / reward weights / hyperparameters in parallel    │
 └───────────────────────────────────────┬──────────────────────────────┘
@@ -105,7 +105,7 @@ The agents ("beans with guns") learn by trial and error (PPO) **only against scr
 | Editor automation | **[Unreal-MCP](https://github.com/IvanMurzak/Unreal-MCP)** (IvanMurzak, beta) | Editor-only. Used on Windows, never on the cluster. |
 | Linux build | Cross-compile from Windows, **toolchain v26 (clang 20.1.8, Rocky Linux 8 sysroot)** | Matches Cradle's Rocky Linux 8.6. |
 | Cluster | **UTRGV Cradle**: Slurm, Rocky Linux 8.6 | 12 GPU nodes (A100 / A30 / L40S), 56–64 cores per node. |
-| Trainer Python | Miniforge env in `$HOME` with a current PyTorch | Cradle's preinstalled PyTorch 1.10.2 / CUDA 11.6 is too old. |
+| Trainer Python | conda-forge env `la-train` (`~/beanRant/envs/la-train` on Cradle, from `cluster/env/la-train.yml`) with a current PyTorch | Cradle's preinstalled PyTorch 1.10.2 / CUDA 11.6 is too old. |
 | Fallback RL stack | [AMD Schola 2.1](https://gpuopen.com/manuals/schola/guides/distributed_training/) (UE 5.5–5.7, MIT) | Only if Epic's trainer becomes limiting. The RL layer is kept separate so this swap stays possible. |
 
 ---
@@ -140,7 +140,7 @@ FPS-Agent/
 │   ├── package_linux.ps1      # Linux BuildCookRun -> tarball + SHA256SUMS (+ -Publish: GitHub prerelease)
 │   └── package/make_tarball.py  # tar.gz with Unix exec bits (Windows has none)
 ├── cluster/
-│   ├── env/                   # Miniforge env setup for the trainer
+│   ├── env/                   # la-train.yml: conda-forge env for the trainer
 │   ├── learning_agents_python/  # Learning Agents + NNE Python copied from the engine, version-pinned
 │   ├── slurm/                 # train_single_node.sbatch, train_multi_node.sbatch, sweep_array.sbatch, eval.sbatch
 │   ├── sweeps/                # sweep definitions (array index → params)
@@ -460,9 +460,9 @@ Note: the older page at `utrgv.edu/hpcc` (55 nodes, 4 GB RAM each) is out of dat
 ### Prep checklist (in order)
 | # | Step | Where | Notes |
 |---|---|---|---|
-| 1 | VPN + SSH login (you); Miniforge + `gh`; `gh auth login`; clone the repo to `~/fps-agent/repo`; start Claude Code there | Cradle login node | The CLUSTER session takes over from here. The LOCAL session never connects to Cradle. |
+| 1 | VPN + SSH login (you); clone the repo to `~/beanRant/FPS-Agent`; start Claude Code there | Cradle login node | The CLUSTER session takes over from here. The LOCAL session never connects to Cradle. Everything on Cradle stays under `~/beanRant/` (D-021, `docs/cradle.md` → *Our paths*). |
 | 2 | Recon (below), plus questions for the admins | Cradle login node | Record the answers in `docs/cradle.md` |
-| 3 | Miniforge + `la-train` env from `cluster/env/la-train.yml` | Login node (has internet) | conda-forge only. Pick the PyTorch CUDA build after seeing `nvidia-smi` in a GPU job |
+| 3 | `la-train` env from `cluster/env/la-train.yml` into `~/beanRant/envs/la-train` (it includes `gh`), then `gh auth login` | Login node (has internet) | conda-forge only. Pick the PyTorch CUDA build after seeing `nvidia-smi` in a GPU job |
 | 4 | Spike E: GPU job runs `torch.cuda.is_available()` | Compute node | Confirms the driver and PyTorch work together |
 | 5 | Copy the Learning Agents + NNE Python files from UE 5.7.4 into `cluster/learning_agents_python/` and commit | LOCAL → git → CLUSTER | Pinned to the engine version. Cradle has no UE install, so these must come through the repo. |
 | 6 | Install the Linux target platform (Epic Launcher) and the v26 toolchain; set `LINUX_MULTIARCH_ROOT` | Windows | Needed to package for Linux |
@@ -492,9 +492,9 @@ Record the answers in `docs/cradle.md`.
 Note: Epic warns that glibc older than 2.35 makes the engine **start more slowly**, because `dlopen` is slower. Rocky 8 ships glibc 2.28, so expect a slower startup only. It's a one-time cost per process.
 
 ### Trainer environment (one time)
-1. Install Miniforge in `$HOME`.
-2. Create the environment: `conda create -n la-train python=3.11 numpy`.
-3. Install the PyTorch build that matches the driver's CUDA version (from `nvidia-smi`), plus `tensorboard` or `mlflow`.
+1. Use the existing `~/miniconda3`; no Miniforge is needed. Keep the package cache in `beanRant/` while creating the env: `export CONDA_PKGS_DIRS=~/beanRant/envs/.pkgs`.
+2. Create the environment as a prefix env, conda-forge only: `conda env create -p ~/beanRant/envs/la-train -f cluster/env/la-train.yml`. The yml pins Python 3.11, numpy, a PyTorch build that matches the driver's CUDA version (from `nvidia-smi`), `smart_open==7.3.0`, `tensorboard` and `gh`.
+3. Activate it with `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train`.
 4. Copy the trainer's Python files **from your UE 5.7 install** into `cluster/learning_agents_python/`, pinned to that engine version:
    - `Engine/Plugins/Experimental/LearningAgents/Content/Python/`
    - `Engine/Plugins/Experimental/NNERuntimeBasicCpu/Content/Python/`
@@ -518,7 +518,7 @@ The policy and critic networks are small multilayer perceptrons, so the GPU most
    - writes `SHA256SUMS`.
 
    The build is Development config, with the Learning Agents training modules included. `/Engine/BasicShapes` is always cooked (`DefaultGame.ini`), because the arena code loads those meshes by path.
-3. Log the build in [`docs/builds.md`](docs/builds.md) and add a request in `STATUS.md`. The CLUSTER side downloads it with `gh release download` into `~/fps-agent/builds/<sha>/` and checks the checksum.
+3. Log the build in [`docs/builds.md`](docs/builds.md) and add a request in `STATUS.md`. The CLUSTER side downloads it with `gh release download` into `~/beanRant/builds/<sha>/` and checks the checksum.
 
 ### How a training job works
 These are the official Learning Agents scale-out flags from Epic's *Scaling Out with Learning Agents* doc. The job script is an **untested sketch** until Spikes A–D pass.
@@ -532,16 +532,16 @@ These are the official Learning Agents scale-out flags from Epic's *Scaling Out 
 #SBATCH --cpus-per-task=<cores>     # whole node if allowed
 #SBATCH --time=<= partition max>
 #SBATCH --signal=B:USR1@300         # warning before walltime, so we can stop cleanly
-#SBATCH --output=logs/%x-%j.out
+#SBATCH --output=/home/%u/beanRant/logs/%x-%j.out   # #SBATCH lines don't expand ~
 set -euo pipefail
 
-BUILD=~/fps-agent/builds/$BUILD_SHA/Linux
-RUN=<weka>/fps-agent/runs/$SLURM_JOB_ID
+BUILD=~/beanRant/builds/$BUILD_SHA/Linux
+RUN=~/beanRant/runs/$SLURM_JOB_ID
 PORT=$((40000 + SLURM_JOB_ID % 20000))     # unique per job: no collisions
 NUM_GAMES=${NUM_GAMES:-16}                  # ~3 cores per game process (tune in Spike B)
 ARENAS=${ARENAS:-16}                        # arenas (= agents) per process (tune in Spike B)
 
-source ~/miniforge3/bin/activate la-train
+source ~/miniconda3/bin/activate ~/beanRant/envs/la-train
 python3 -u cluster/learning_agents_python/train.py FPSAgent -l \
   --nne-cpu-path cluster/learning_agents_python/nne_runtime_basic_cpu \
   Socket 127.0.0.1:$PORT "$RUN/trainer" > "$RUN/trainer.log" 2>&1 &
@@ -597,7 +597,7 @@ Engine flags we rely on: `-nullrhi -nosound -unattended`, `-LearningAgentsUseExt
 3. **Across experiments:** `sweep_array.sbatch` uses `#SBATCH --array=0-7`. Each array index picks a seed, reward weights or hyperparameters from `cluster/sweeps/*.yaml`. These are independent runs that train side by side.
 
 **Checkpoints and time limits:**
-- The trainer writes snapshots to `$RUN/trainer` on Weka.
+- The trainer writes snapshots to `$RUN/trainer` (`~/beanRant/runs/<run-id>/trainer`).
 - On `USR1`, the job shuts the game processes down cleanly.
 - Long runs chain jobs with `sbatch --dependency=afterany:<jobid>`, and each new job resumes from the latest snapshot. How resume works is checked in Spike A.
 

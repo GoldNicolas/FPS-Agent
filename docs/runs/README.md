@@ -3,7 +3,7 @@
 **Owner: CLUSTER side.** One file per training or evaluation run: `docs/runs/<run-id>.md`.
 
 - **Run ID:** `<stage>-<YYYYMMDD>-<slurm-job-id>` (e.g. `S0-20261120-48213`). Sweeps: `<stage>-<sweep>-<arrayjob>_<index>`.
-- **Stays on Cradle (Weka):** full snapshots, logs, TensorBoard event files.
+- **Stays on Cradle, in `~/beanRant/runs/<run-id>/` (D-021):** full snapshots, logs, TensorBoard event files.
 - **Goes in git:** this report plus small CSV metric summaries (< 1 MB) in `docs/runs/<run-id>/`.
 - **Goes to GitHub Releases:** snapshots the LOCAL side should watch or evaluate, tagged `run-<run-id>`:
   `gh release create run-<run-id> <snapshot files> --prerelease --notes "<summary>"`

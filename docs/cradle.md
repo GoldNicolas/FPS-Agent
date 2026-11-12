@@ -59,7 +59,7 @@ Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
 | GPU driver version / max CUDA (`nvidia-smi`) | **550.54.14 / CUDA 12.4** on gpu001 (`gpuq`, A100 80GB PCIe). Other partitions not checked yet. |
 | glibc | 2.28 (Rocky Linux 8.6, kernel 4.18.0-372.9.1), login and compute nodes |
 | Home path and quota | `/home/<user>` on NFS `riogrande:/home` (110 TB, 36 TB free). `quota -s` reports nothing usable. |
-| Weka path for run outputs and quota | `/weka/scratch` (wekafs, 80 TB, 44 TB free), visible on compute nodes. No per-user directory; `/weka/scratch/milab` exists (group `milab`, setgid, group-writable). Our runs folder there is **not created yet** (see *Our paths*). Quota and purge policy unknown. |
+| Weka path for run outputs and quota | **Not used (D-021): run outputs go to `~/beanRant/runs/`.** For reference: `/weka/scratch` (wekafs, 80 TB, 44 TB free) is visible on compute nodes; there's no per-user directory, but `/weka/scratch/milab` exists (group `milab`, setgid, group-writable). Quota and purge policy unknown. |
 | Outbound internet on login node / compute nodes | yes / yes (HTTPS to github.com and conda.anaconda.org from login001 and gpu001) |
 | Node-to-node TCP on arbitrary ports (for multi-node) | TBD: untested (Spike D) |
 | Apptainer available? | No `apptainer`; `/usr/bin/singularity` exists (not required) |
@@ -67,21 +67,35 @@ Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
 | `gh` CLI | **Not installed** on login001. `git` reaches GitHub over HTTPS (`origin` = `https://github.com/GoldNicolas/FPS-Agent.git`). |
 | Conda | Existing `~/miniconda3` (conda 25.7.0, default channel `defaults`); no Miniforge |
 
-## Our paths on Cradle
-The user keeps this project under `~/beanRant/`. These replace the `~/fps-agent/...` paths in README and the spike sketches.
+## Our paths on Cradle (D-021)
+**Everything this project produces on Cradle stays under `~/beanRant/`** (user decision, 2026-11-11). These paths replace the `~/fps-agent/...`, `~/miniforge3` and `<weka>/...` paths in older docs and sketches.
+
+```
+~/beanRant/
+├── FPS-Agent/          # this repo (git). Nothing below is ever committed.
+├── builds/<sha>/       # gh release download build-<sha>; sha256sum -c; untar → Linux/
+├── runs/<run-id>/      # one folder per run: trainer/ (snapshots, configs, TensorBoard), trainer.log, game_<i>.log
+├── logs/               # Slurm stdout/stderr: #SBATCH --output=/home/%u/beanRant/logs/%x-%j.out
+└── envs/la-train/      # conda prefix env from cluster/env/la-train.yml
+```
 
 | What | Path | State |
 |---|---|---|
 | Repo | `~/beanRant/FPS-Agent` | cloned |
-| Builds | `~/beanRant/builds/<sha>/` | not created yet |
-| Run outputs | **pending user decision:** `/weka/scratch/milab/<user>/fps-agent/runs/<run-id>/` or `~/beanRant/runs/<run-id>/` | not created yet |
-| Conda env `la-train` | `~/miniconda3/envs/la-train`, **conda-forge only** (`channels: [conda-forge, nodefaults]` in the yml, since the base config uses `defaults`) | L-003 |
+| Builds | `~/beanRant/builds/<sha>/` | created on first download (L-004) |
+| Run outputs | `~/beanRant/runs/<run-id>/` (run ID per `docs/runs/README.md`) | created by the first job |
+| Slurm output | `~/beanRant/logs/%x-%j.out` | created before the first `sbatch` (Slurm doesn't create it) |
+| Conda env `la-train` | `~/beanRant/envs/la-train`, created as a **prefix env** with the existing `~/miniconda3`: `conda env create -p ~/beanRant/envs/la-train -f cluster/env/la-train.yml`. Set `CONDA_PKGS_DIRS=~/beanRant/envs/.pkgs` while creating it so the downloaded packages also stay in `beanRant/` (delete that cache afterwards with `conda clean`). | L-003 |
+| `gh` login | `~/.config/gh/` (the only file outside `beanRant/`, written by `gh auth login`) | after L-003 |
 
-**Shell trap on this account:** login shells start with `VIRTUAL_ENV` and the front of `PATH` pointing at another project's env (`~/miniconda3/envs/locomujoco`). Job scripts must activate `la-train` explicitly (`source ~/miniconda3/bin/activate la-train`), and pip installs need `VIRTUAL_ENV=$CONDA_PREFIX` first.
+- **Activate in scripts:** `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train`.
+- **conda-forge only:** the yml lists `channels: [conda-forge, nodefaults]`, because this account's conda config defaults to `defaults`.
+- **Slurm `#SBATCH` lines don't expand `~` or `$HOME`.** Use `/home/%u/...` there.
+- **Shell trap on this account:** login shells start with `VIRTUAL_ENV` and the front of `PATH` pointing at another project's env (`~/miniconda3/envs/locomujoco`). Always activate `la-train` explicitly, and set `VIRTUAL_ENV=$CONDA_PREFIX` before any `pip install`.
 
 ## Questions for the admins (still open)
 - [ ] Max walltime is unlimited on `gpuq`. Is there a soft policy on job length or on how many GPUs and nodes one user may hold?
 - [ ] Are whole-node (`--exclusive`) jobs acceptable on `gpuq`?
 - [ ] Can compute nodes reach each other on arbitrary TCP ports? (We can also test this in Spike D.)
-- [ ] Is `/weka/scratch/milab/<user>/` the right place for ~10–100 GB of run outputs? What are the quota and purge policy for `/weka/scratch`?
-- [ ] What is the home (`/home`) quota? `quota -s` doesn't report it.
+- [ ] What is the home (`/home`) quota? `quota -s` doesn't report it. **This matters most now**: builds, runs, logs and the conda env all live in home (D-021).
+- [ ] Only if outputs outgrow home: is `/weka/scratch/milab/<user>/` the right place for ~10–100 GB of run outputs, and what are its quota and purge policy?
