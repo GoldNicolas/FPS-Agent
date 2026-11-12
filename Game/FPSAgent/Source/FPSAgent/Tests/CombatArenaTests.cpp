@@ -1,4 +1,5 @@
 #include "Misc/AutomationTest.h"
+#include "Arena/ArenaBuilder.h"
 #include "Bots/ScriptedBot.h"
 #include "Common/FPSAgentSettings.h"
 #include "Learning/CombatArena.h"
@@ -147,7 +148,50 @@ bool FFPSCombatArenaObservationTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("no sounds in S0"), O.Sounds.Num(), 0);
 
 	const FPSCombatObs::FAgentAction Act = A->ScriptedAction(4.f / 60.f);
-	TestTrue(TEXT("scripted agent turns toward the bot"), FMath::Abs(Act.Aim.X) < 1.0);
+	TestTrue(TEXT("scripted agent targets the bot ahead (no-target scan would be Aim.X = 1)"), FMath::Abs(Act.Aim.X) < 0.05);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatArenaFairnessTest, "FPSAgent.Combat.Arena.FairnessAndScripted",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatArenaFairnessTest::RunTest(const FString& Parameters)
+{
+	FPSTest::FTestWorld W;
+	TStrongObjectPtr<UCombatArena> A(NewObject<UCombatArena>(GetTransientPackage()));
+	A->Build(W.World, 0, FVector::ZeroVector, 7);
+	// Bot 0: 20 deg right at 10 m, in view. Bot 1: straight ahead at 15 m, behind a wall at x = 1000.
+	FPSCurriculum::FS0Episode E;
+	E.AgentYawDeg = 0.f;
+	const double Rad = FMath::DegreesToRadians(20.0);
+	E.BotOffsets = { FVector2D(1000.0 * FMath::Cos(Rad), 1000.0 * FMath::Sin(Rad)), FVector2D(1500.0, 0.0) };
+	E.BotCrouched = { false, false };
+	FPSArena::SpawnBlock(W.World, FVector(1000.0, 0.0, 200.0), FVector(50.0, 300.0, 400.0));
+	A->StartEpisode(E, 11, 0.0);
+	W.Step();
+
+	A->PrepareDecision(0.1);
+	TestEqual(TEXT("only the visible bot pays a first sighting"), A->GetLedger().PendingTerm(ETerm::FirstSighting), 0.2f, 1e-6f);
+	FPSCombatObs::FObservationData O;
+	A->BuildObservation(O, 0.1);
+	TestEqual(TEXT("the bot behind the wall is not observed (rule 4)"), O.Enemies.Num(), 1);
+
+	const FPSCombatObs::FAgentAction Act = A->ScriptedAction(4.f / 60.f); // 720 deg/s -> 48 deg per decision
+	TestEqual(TEXT("scripted agent turns right toward the visible bot: 20 of 48 deg"), static_cast<float>(Act.Aim.X), 20.f / 48.f, 0.005f);
+	TestFalse(TEXT("no fire 20 deg off target"), Act.bFire);
+
+	// Hit indicator (D-024): the direction of damage taken shows even from behind a wall.
+	A->GetAgent()->GetHealth()->ApplyHit(10.f, A->GetBot(1));
+	const double T = W.World->GetTimeSeconds();
+	A->BuildObservation(O, T + 0.1);
+	TestTrue(TEXT("hit indicator on"), O.bHit);
+	TestEqual(TEXT("hit size"), O.Hit.Num(), FPSCombatObs::HitSize);
+	if (O.Hit.Num() == FPSCombatObs::HitSize)
+	{
+		TestTrue(TEXT("hit comes from ahead (bot 1)"), O.Hit[0] > 0.9f);
+		TestEqual(TEXT("hit age 0.1 s / 1 s"), O.Hit[3], 0.1f, 1e-3f);
+	}
+	A->BuildObservation(O, T + 1.5);
+	TestFalse(TEXT("hit indicator expires after HitIndicatorSeconds"), O.bHit);
 	return true;
 }
 
