@@ -59,9 +59,13 @@ namespace FPSCombatObs
 
 	FAgentAction Sanitize(const FAgentAction& A)
 	{
+		// GetClampedToMaxSize passes NaN through (its size comparison is false), so zero non-finite components first.
+		auto Finite = [](double V) { return FMath::IsFinite(V) ? V : 0.0; };
 		FAgentAction C = A;
-		C.Aim = FVector2D(FMath::Clamp(A.Aim.X, -1.0, 1.0), FMath::Clamp(A.Aim.Y, -1.0, 1.0));
-		C.Move = A.Move.GetClampedToMaxSize(1.0);
+		C.Move = FVector2D(Finite(A.Move.X), Finite(A.Move.Y));
+		C.Aim = FVector2D(Finite(A.Aim.X), Finite(A.Aim.Y));
+		C.Aim = FVector2D(FMath::Clamp(C.Aim.X, -1.0, 1.0), FMath::Clamp(C.Aim.Y, -1.0, 1.0));
+		C.Move = C.Move.GetClampedToMaxSize(1.0);
 		return C;
 	}
 

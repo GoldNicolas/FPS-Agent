@@ -1,5 +1,6 @@
 #include "Misc/AutomationTest.h"
 #include "Learning/CombatObservation.h"
+#include <limits>
 
 #if WITH_DEV_AUTOMATION_TESTS
 
@@ -65,6 +66,13 @@ bool FFPSCombatObsActionTest::RunTest(const FString& Parameters)
 
 	TestTrue(TEXT("forward at yaw 90 = world +Y"), MoveWorld(FVector2D(1.0, 0.0), 90.f).Equals(FVector(0.0, 1.0, 0.0), 1e-4));
 	TestTrue(TEXT("right at yaw 0 = world +Y"), MoveWorld(FVector2D(0.0, 1.0), 0.f).Equals(FVector(0.0, 1.0, 0.0), 1e-4));
+
+	FAgentAction Bad;
+	Bad.Move = FVector2D(std::numeric_limits<double>::quiet_NaN(), 0.5);
+	Bad.Aim = FVector2D(-std::numeric_limits<double>::infinity(), std::numeric_limits<double>::quiet_NaN());
+	const FAgentAction Clean = Sanitize(Bad);
+	TestTrue(TEXT("NaN move component -> 0"), Clean.Move.Equals(FVector2D(0.0, 0.5), 1e-9));
+	TestTrue(TEXT("non-finite aim -> 0"), Clean.Aim.Equals(FVector2D::ZeroVector, 1e-9));
 	return true;
 }
 

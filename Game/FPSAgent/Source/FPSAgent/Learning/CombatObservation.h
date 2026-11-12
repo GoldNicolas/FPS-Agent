@@ -79,7 +79,7 @@ namespace FPSCombatObs
 		bool bWalk = false;
 		bool bJump = false;
 	};
-	/** Policy samples can leave [-1, 1]: clamp Aim per axis and Move to length 1. */
+	/** Policy samples can leave [-1, 1]: non-finite components become 0, then Aim is clamped per axis and Move to length 1. */
 	FPSAGENT_API FAgentAction Sanitize(const FAgentAction& A);
 	/** Aim change per tick in degrees (yaw, pitch): Aim * MaxTurnRate * TickSeconds (spread evenly, never snapped). */
 	FPSAGENT_API FVector2D AimPerTickDeg(const FVector2D& Aim, const FCombatPerceptionSettings& P, float TickSeconds);
