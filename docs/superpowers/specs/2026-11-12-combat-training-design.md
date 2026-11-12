@@ -1,7 +1,8 @@
 # Combat training (S0–S3): design
 
-- **Status: all sections agreed with the user, one by one (2026-11-12). Waiting for the user's review of the whole document.**
-  - Implementation starts after that review, with the build A (S0) plan in `docs/superpowers/plans/`.
+- **Status: APPROVED by the user (2026-11-12).** All six sections were agreed one by one, then the whole document was reviewed.
+  - Next: the build A (S0) implementation plan in `docs/superpowers/plans/`, then the code (tests first).
+  - Changes from now on are recorded in this file and in `docs/decisions.md`.
 - **Side:** LOCAL (game). CLUSTER runs the training.
 - **Research behind it:** [`docs/research/rl-reward-and-optimization.md`](../../research/rl-reward-and-optimization.md).
 - **Builds on:** README → *RL design* (observations, actions, reward table, curriculum) and → *Scripted bots*. Spike A ([`docs/spikes/A-learning-agents-linux.md`](../../spikes/A-learning-agents-linux.md)) proved the pipeline. D-022 sets the episode-end rule.
