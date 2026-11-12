@@ -311,14 +311,14 @@ This is also better for RL. Randomized original layouts keep the agent from memo
 | Self | Velocity (local frame), grounded, crouched, health, armor, ammo fraction, reloading, current spread, recoil state / time since last shot, aim pitch |
 | Geometry | Fan of about 72 ray casts from eye height (e.g. 24 yaw × 3 pitch), normalized distance and hit type |
 | Enemies (set, up to 5) | Only enemies that pass a **line-of-sight check** (traces to head and chest, inside the 103° FOV), or were seen in the last ~2 s (flagged as "remembered"). For each: relative position in the local frame, distance, **aim error to the head** (yaw and pitch), relative velocity, whether it is facing the agent |
-| Optional, later | Directional footstep sound cues within a radius |
+| Hit indicator, hearing (D-024) | Direction of damage taken. Enemy gunshots and footsteps within a radius: direction, rough distance, age (the same rules the bots use). Full layout: `docs/superpowers/specs/2026-11-12-combat-training-design.md` §2 |
 
 ### Actions
 - Movement on 2 continuous axes (forward/back, left/right)
 - Walk, crouch, jump (on/off)
 - Aim: change in yaw and pitch, **capped by a maximum turn-rate setting**
 - Fire, reload (on/off)
-- The agent decides **15–20 times per second**; physics runs at a fixed 60 Hz.
+- The agent decides **15 times per second** (every 4th fixed 60 Hz tick, D-023), with the aim change spread over those ticks and capped by the turn-rate setting (720°/s).
 
 ### Human-likeness settings (the "staged" end goal)
 Max turn rate, reaction delay (observations delayed by N ms) and aim noise. All are configurable. Agents train with fair observations, and these settings can be relaxed for research runs or tightened for in-game difficulty levels.

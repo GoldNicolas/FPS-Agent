@@ -49,7 +49,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
    - nothing that relies on animation ticking, render-thread queries or screenshots.
    - Cradle has no OpenGL or display.
 3. **Agents train ONLY against scripted bots.** No self-play and no agent-vs-agent play in training. In training, agents must never observe or damage other agents (each arena instance holds 1 agent plus its bots). Agent-vs-agent play exists **only** in the deathmatch evaluation, which runs inference-only snapshots.
-4. **Fair observations.** An enemy shows up in observations only if it passes a line-of-sight check inside the FOV, or was seen within the short memory window. No information through walls.
+4. **Fair observations.** An enemy shows up in observations only if it passes a line-of-sight check inside the FOV, or was seen within the short memory window. No information through walls, with two human-equivalent exceptions (D-024): a hit indicator (direction of damage taken) and hearing enemy gunshots and footsteps within a radius.
 5. **Original maps only.** Never reproduce Riot's maps (layouts, callouts, proportions traced from real maps), names, characters or assets, not even approximately. Follow genre structure (sites, mid, chokes, sightline bands) with original layouts. Name the rifle and maps generically (no "Vandal", "Ascent" and so on in code or assets).
 6. **No local training.** All training and large evaluation runs happen on Cradle. Locally, only build, play-test (no training), package and replay snapshots.
 7. **Mechanics are data, not constants.** Movement, weapon, health, bot-difficulty and reward values live in DataAssets or config, each with a source or `verify` note. Never hard-code them in gameplay logic.

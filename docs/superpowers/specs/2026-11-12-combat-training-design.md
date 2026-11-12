@@ -77,8 +77,29 @@ Today's trained agents can't improve further: they only walk to targets and alre
    - writes a JSON summary (clear rate, kills, deaths, damage, time to clear, accuracy, headshot %);
    - the promotion check between stages uses it.
 
-## 2. Observations and actions (not agreed yet)
-To cover: self state, the ray-cast fan, the enemy set with line-of-sight, field-of-view and memory rules, the action layout (move, aim with a capped turn rate, fire, reload, crouch, walk), and human-likeness settings.
+## 2. Observations and actions (agreed 2026-11-12)
+The same layout is used in every stage. Everything is in the agent's view frame (yaw of the aim); positions and velocities are scaled by settings.
+
+**Observations** (one Learning Agents struct observation):
+
+| Part | Contents | Learning Agents type |
+|---|---|---|
+| Self (about 16 numbers) | Velocity (view frame) · on ground, crouched, walking · health and armor (fractions) · ammo in magazine (fraction), reloading · current spread, shots in the current spray, time since last shot · aim pitch · **time left in the episode** (fraction) | struct of float / bool / velocity |
+| Surroundings | **72 rays** from eye height: 24 directions × 3 pitches (down, level, up), range 30 m (settings). **They trace level geometry only and ignore all pawns**, so they never reveal an enemy. | lidar / static array |
+| Enemies (set, up to 5) | Only enemies that pass a **line-of-sight trace to the head or chest AND are inside the 103° view cone**, or that were seen in the last **2 s** (shown as remembered, at the last-known position). Per enemy: position and distance · **aim error to the head** (yaw, pitch) · velocity · facing the agent · crouched · visible now or remembered, plus the age. | set observation (attention; order and count don't matter) |
+| Hit indicator (D-024) | When damaged: the direction the damage came from (view frame), plus its age. Empty otherwise. | optional |
+| Hearing (set, up to 4; D-024) | Recent gunshots and footsteps by enemies within a hearing radius, using the same rules and radii as the bots: direction (view frame), rough distance, age. | set observation |
+
+**Actions** (15 decisions per second, each held for 4 physics ticks):
+
+| Action | Type | Notes |
+|---|---|---|
+| Move | continuous, 2 values (forward, right) | Clamped to length 1. Ignored in S0. |
+| Aim | continuous, 2 values (yaw, pitch change) | ±1 = the maximum turn per decision. **Turn-rate cap 720°/s** (a setting, `verify`). Spread evenly over the 4 ticks, never snapped. |
+| Fire | bool | The trigger is held for the 4 ticks; the rifle's own cadence decides the shots. |
+| Reload, crouch, walk, jump | bool each | Crouch, walk and jump are ignored in S0. |
+
+**Human-likeness settings** (README → *Human-likeness*): reaction delay (observations delayed by N ms) and aim noise exist from the start, but they're **off in training**. They're raised later for in-game difficulty levels.
 
 ## 3. Reward (not agreed yet)
 To cover: every term with its starting weight, the clear bonus as above, termination versus truncation, and logging.
