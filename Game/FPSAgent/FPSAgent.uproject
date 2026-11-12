@@ -12,6 +12,10 @@
 	],
 	"Plugins": [
 		{
+			"Name": "LearningAgents",
+			"Enabled": true
+		},
+		{
 			"Name": "UnrealMCP",
 			"Enabled": true,
 			"TargetDenyList": [ "Game", "Client", "Server" ]

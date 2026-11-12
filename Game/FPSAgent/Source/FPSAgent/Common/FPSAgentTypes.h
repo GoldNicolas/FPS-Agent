@@ -138,3 +138,42 @@ struct FRangeSettings
 	UPROPERTY(EditAnywhere, Category="Range") float WallHeightCm = 400.f;
 	UPROPERTY(EditAnywhere, Category="Range") float WallThicknessCm = 50.f;
 };
+
+/**
+ * Spike A toy task (-Stage=SpikeA): walk the bean to a random point on a walled floor. It proves the training stack
+ * (packaged Linux build -> external trainer -> snapshots -> resume), not gameplay. All values are toy choices with no
+ * external source; tune freely.
+ */
+USTRUCT(BlueprintType)
+struct FReachTaskSettings
+{
+	GENERATED_BODY()
+	/** Side of each square arena floor (walled). */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float ArenaSizeCm = 2000.f;
+	/** Distance between arena centers. Arenas never touch, so agents never meet (hard rule 3). */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float ArenaSpacingCm = 4000.f;
+	/** Starts and targets keep this far from the walls. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float WallMarginCm = 150.f;
+	UPROPERTY(EditAnywhere, Category="SpikeA") float TargetMinDistanceCm = 300.f;
+	UPROPERTY(EditAnywhere, Category="SpikeA") float TargetMaxDistanceCm = 1200.f;
+	/** Success when the bean's center is within this 2D distance of the target. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float ReachRadiusCm = 100.f;
+	/** Reward per meter closed in a step (negative when moving away). */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float ProgressRewardPerMeter = 1.f;
+	/** One-off reward on reaching the target. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float ReachBonus = 5.f;
+	/** Cost per second of episode time, so the shortest path wins. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float TimePenaltyPerSecond = 0.5f;
+	/** Episode cap in steps (one step per 60 Hz tick: 360 = 6 s). Hitting it is a truncation, not a failure. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") int32 MaxEpisodeSteps = 360;
+	/** Trainer writes snapshots every N iterations. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") int32 IterationsPerSnapshot = 10;
+	/** Trainer stops after N iterations and tells the games to exit. -Iterations= overrides. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") int32 MaxIterations = 1000000;
+	/** Ask the trainer for GPU (it falls back to CPU without CUDA). */
+	UPROPERTY(EditAnywhere, Category="SpikeA") bool bTrainOnGpu = true;
+	/** Ask the trainer for TensorBoard logs (skipped with a warning if the package is missing). */
+	UPROPERTY(EditAnywhere, Category="SpikeA") bool bUseTensorboard = true;
+	/** Game-side stats line in the log every N seconds of game time. */
+	UPROPERTY(EditAnywhere, Category="SpikeA") float StatsLogIntervalSeconds = 10.f;
+};

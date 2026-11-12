@@ -31,8 +31,12 @@ public:
 	/** Resolves the requested arena name; "pool" picks a pool entry with Rng. Returns "range" for empty/"range". */
 	static FString ResolveArenaName(const FString& Requested, const TArray<FString>& PoolNames, FRandomStream& Rng);
 
+	/** -Stage=SpikeA or fps.Stage SpikeA: build the toy reach task instead of the range/map. */
+	static bool WantsSpikeA();
+
 protected:
 	void BuildRangeArena(UWorld* World);
+	void BuildSpikeA(UWorld* World);
 	bool BuildMapArena(UWorld* World, const FString& SpecName);
 
 	FString ArenaName = TEXT("range");

@@ -32,6 +32,21 @@ bool FFPSRunArgsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("arenas clamped"), FFPSRunArgs::Parse(TEXT("-Arenas=0")).Arenas, 1);
 	TestEqual(TEXT("map"), FFPSRunArgs::Parse(TEXT("-nullrhi -Map=map01 -Seed=3")).Map, FString(TEXT("map01")));
 	TestTrue(TEXT("map unset by default"), D.Map.IsEmpty());
+
+	const FFPSRunArgs L = FFPSRunArgs::Parse(TEXT("-nullrhi -Stage=SpikeA -Infer -ResumeFrom=\"/w/runs/1/trainer/FPSAgent0/Snapshots\" -Iterations=200"));
+	TestTrue(TEXT("spike A stage"), L.IsSpikeA());
+	TestTrue(TEXT("infer flag"), L.bInfer);
+	TestEqual(TEXT("resume dir (quoted)"), L.ResumeFrom, FString(TEXT("/w/runs/1/trainer/FPSAgent0/Snapshots")));
+	TestEqual(TEXT("iterations"), L.Iterations, 200);
+	TestTrue(TEXT("stage match is case-insensitive"), FFPSRunArgs::Parse(TEXT("-Stage=spikea")).IsSpikeA());
+	TestFalse(TEXT("S0 is not spike A"), D.IsSpikeA());
+	TestFalse(TEXT("infer off by default"), D.bInfer);
+	TestFalse(TEXT("scripted off by default"), D.bScripted);
+	const FFPSRunArgs Sc = FFPSRunArgs::Parse(TEXT("-Stage=SpikeA -Scripted"));
+	TestTrue(TEXT("scripted"), Sc.bScripted);
+	TestTrue(TEXT("scripted implies infer"), Sc.bInfer);
+	TestTrue(TEXT("resume unset by default"), D.ResumeFrom.IsEmpty());
+	TestEqual(TEXT("iterations 0 = settings"), D.Iterations, 0);
 	return true;
 }
 

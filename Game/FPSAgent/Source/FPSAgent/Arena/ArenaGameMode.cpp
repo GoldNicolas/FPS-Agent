@@ -10,11 +10,22 @@
 #include "FPSAgent.h"
 #include "GameFramework/PlayerStart.h"
 #include "HAL/IConsoleManager.h"
+#include "Learning/ReachTaskActor.h"
 
 static TAutoConsoleVariable<FString> CVarPlayMap(
 	TEXT("fps.PlayMap"), TEXT(""),
 	TEXT("Arena for the next Play: range | map01 | gen_007 | pool. Overrides Project Settings; -Map= overrides this."),
 	ECVF_Default);
+
+static TAutoConsoleVariable<FString> CVarStage(
+	TEXT("fps.Stage"), TEXT(""),
+	TEXT("Stage for the next Play: SpikeA = toy reach task (policy playback only in the editor). -Stage=SpikeA does the same."),
+	ECVF_Default);
+
+bool AArenaGameMode::WantsSpikeA()
+{
+	return FFPSRunArgs::Get().IsSpikeA() || CVarStage.GetValueOnGameThread().Equals(TEXT("SpikeA"), ESearchCase::IgnoreCase);
+}
 
 AArenaGameMode::AArenaGameMode()
 {
@@ -42,6 +53,14 @@ void AArenaGameMode::InitGame(const FString& MapName, const FString& Options, FS
 	const FFPSRunArgs& Args = FFPSRunArgs::Get();
 	Rng.Initialize(Args.Seed);
 
+	if (WantsSpikeA())
+	{
+		BuildSpikeA(GetWorld());
+		FPSArena::SpawnPreviewLighting(GetWorld());
+		UE_LOG(LogFPSAgent, Log, TEXT("ArenaGameMode: arena=%s %s"), *ArenaName, *Args.ToString());
+		return;
+	}
+
 	FString Requested = Args.Map;
 	if (Requested.IsEmpty()) { Requested = CVarPlayMap.GetValueOnGameThread(); }
 	if (Requested.IsEmpty()) { Requested = UFPSAgentSettings::Get().Map.PlayMap; }
@@ -66,6 +85,21 @@ void AArenaGameMode::BuildRangeArena(UWorld* World)
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	PlayerStart = World->SpawnActor<APlayerStart>(RangeLayout.PlayerStart.GetLocation(), RangeLayout.PlayerStart.Rotator(), Params);
+}
+
+void AArenaGameMode::BuildSpikeA(UWorld* World)
+{
+	// The toy task builds its own arenas and agents. The local player only watches (spectator, no bean).
+	ArenaName = TEXT("spikeA");
+	bStartPlayersAsSpectators = true;
+	const FReachTaskSettings& S = UFPSAgentSettings::Get().SpikeA;
+	Bounds = AReachTaskActor::ComputeBounds(FFPSRunArgs::Get().Arenas, S, FVector::ZeroVector);
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	World->SpawnActor<AReachTaskActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	// Watch arena 0 from behind its -X wall, looking down at it.
+	const FVector Eye(-0.5f * S.ArenaSizeCm - 600.f, 0.f, 900.f);
+	PlayerStart = World->SpawnActor<APlayerStart>(Eye, FRotator(-40.f, 0.f, 0.f), Params);
 }
 
 bool AArenaGameMode::BuildMapArena(UWorld* World, const FString& SpecName)
@@ -101,6 +135,10 @@ AActor* AArenaGameMode::ChoosePlayerStart_Implementation(AController* Player)
 void AArenaGameMode::StartPlay()
 {
 	Super::StartPlay();
+	if (ArenaName == TEXT("spikeA"))
+	{
+		return; // no bots in the toy task
+	}
 	const int32 BaseSeed = FFPSRunArgs::Get().Seed;
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AdjustIfPossibleButAlwaysSpawn;
