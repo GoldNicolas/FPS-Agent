@@ -6,10 +6,12 @@
 #include "Character/BeanPlayerController.h"
 #include "Common/FPSAgentSettings.h"
 #include "Common/FPSRunArgs.h"
+#include "Common/SettingsOverride.h"
 #include "Engine/World.h"
 #include "FPSAgent.h"
 #include "GameFramework/PlayerStart.h"
 #include "HAL/IConsoleManager.h"
+#include "HAL/PlatformMisc.h"
 #include "Learning/ReachTaskActor.h"
 
 static TAutoConsoleVariable<FString> CVarPlayMap(
@@ -21,6 +23,38 @@ static TAutoConsoleVariable<FString> CVarStage(
 	TEXT("fps.Stage"), TEXT(""),
 	TEXT("Stage for the next Play: SpikeA = toy reach task (policy playback only in the editor). -Stage=SpikeA does the same."),
 	ECVF_Default);
+
+namespace
+{
+	/** -Set= overrides, applied once per process before anything reads the settings (spec §6, D-025). */
+	bool ApplySettingsOverridesOnce()
+	{
+		static bool bDone = false;
+		static bool bOk = true;
+		if (bDone)
+		{
+			return bOk;
+		}
+		bDone = true;
+		const FString& Spec = FFPSRunArgs::Get().SetOverrides;
+		if (Spec.IsEmpty())
+		{
+			return true;
+		}
+		TArray<FString> Applied;
+		FString Error;
+		bOk = FPSSettingsOverride::Apply(*GetMutableDefault<UFPSAgentSettings>(), Spec, Applied, Error);
+		if (bOk)
+		{
+			UE_LOG(LogFPSAgent, Display, TEXT("Settings overrides (-Set): %s"), *FString::Join(Applied, TEXT("; ")));
+		}
+		else
+		{
+			UE_LOG(LogFPSAgent, Error, TEXT("exiting (code 2): bad -Set: %s"), *Error);
+		}
+		return bOk;
+	}
+}
 
 bool AArenaGameMode::WantsSpikeA()
 {
@@ -50,6 +84,14 @@ FString AArenaGameMode::ResolveArenaName(const FString& Requested, const TArray<
 void AArenaGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
 	Super::InitGame(MapName, Options, ErrorMessage);
+	if (!ApplySettingsOverridesOnce())
+	{
+		if (!GIsEditor)
+		{
+			FPlatformMisc::RequestExitWithStatus(false, 2);
+		}
+		return;
+	}
 	const FFPSRunArgs& Args = FFPSRunArgs::Get();
 	Rng.Initialize(Args.Seed);
 
