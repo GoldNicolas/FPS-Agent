@@ -29,6 +29,7 @@ public:
 	float GetHorizontalSpeed() const;
 	bool IsAirborne() const;
 	void SetWalking(bool bWalk);
+	bool IsWalking() const { return bWalking; }
 	void SetHitboxesVisible(bool bVisible);
 	/** Dead beans are hidden, have no collision, and neither move nor shoot. */
 	void SetDeadState(bool bDead);
