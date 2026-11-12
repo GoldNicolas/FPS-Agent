@@ -12,6 +12,7 @@
 #include "GameFramework/PlayerStart.h"
 #include "HAL/IConsoleManager.h"
 #include "HAL/PlatformMisc.h"
+#include "Learning/CombatTaskActor.h"
 #include "Learning/ReachTaskActor.h"
 
 static TAutoConsoleVariable<FString> CVarPlayMap(
@@ -21,7 +22,7 @@ static TAutoConsoleVariable<FString> CVarPlayMap(
 
 static TAutoConsoleVariable<FString> CVarStage(
 	TEXT("fps.Stage"), TEXT(""),
-	TEXT("Stage for the next Play: SpikeA = toy reach task (policy playback only in the editor). -Stage=SpikeA does the same."),
+	TEXT("Stage for the next Play: SpikeA = toy reach task, S0 = combat aim gallery (policy playback only in the editor). -Stage= does the same."),
 	ECVF_Default);
 
 namespace
@@ -81,6 +82,26 @@ FString AArenaGameMode::ResolveArenaName(const FString& Requested, const TArray<
 	return Requested;
 }
 
+int32 AArenaGameMode::RequestedCombatStage()
+{
+	const int32 FromArgs = FFPSRunArgs::Get().CombatStageIndex();
+	return FromArgs >= 0 ? FromArgs : FFPSRunArgs::CombatStageIndexOf(CVarStage.GetValueOnGameThread());
+}
+
+void AArenaGameMode::BuildCombat(UWorld* World)
+{
+	// The combat task builds its own arenas, agents and bots. The local player only watches (spectator, no bean).
+	ArenaName = TEXT("combat");
+	bStartPlayersAsSpectators = true;
+	Bounds = ACombatTaskActor::ComputeBounds(FFPSRunArgs::Get().Arenas, FVector::ZeroVector);
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	World->SpawnActor<ACombatTaskActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	// Watch arena 0 (centred on the origin) from above its -X edge.
+	const float Half = UCombatArena::FloorHalfSizeCm();
+	PlayerStart = World->SpawnActor<APlayerStart>(FVector(-Half - 1500.0, 0.0, 2500.0), FRotator(-45.0, 0.0, 0.0), Params);
+}
+
 void AArenaGameMode::InitGame(const FString& MapName, const FString& Options, FString& ErrorMessage)
 {
 	Super::InitGame(MapName, Options, ErrorMessage);
@@ -98,6 +119,14 @@ void AArenaGameMode::InitGame(const FString& MapName, const FString& Options, FS
 	if (WantsSpikeA())
 	{
 		BuildSpikeA(GetWorld());
+		FPSArena::SpawnPreviewLighting(GetWorld());
+		UE_LOG(LogFPSAgent, Log, TEXT("ArenaGameMode: arena=%s %s"), *ArenaName, *Args.ToString());
+		return;
+	}
+
+	if (RequestedCombatStage() >= 0)
+	{
+		BuildCombat(GetWorld());
 		FPSArena::SpawnPreviewLighting(GetWorld());
 		UE_LOG(LogFPSAgent, Log, TEXT("ArenaGameMode: arena=%s %s"), *ArenaName, *Args.ToString());
 		return;
@@ -177,9 +206,9 @@ AActor* AArenaGameMode::ChoosePlayerStart_Implementation(AController* Player)
 void AArenaGameMode::StartPlay()
 {
 	Super::StartPlay();
-	if (ArenaName == TEXT("spikeA"))
+	if (ArenaName == TEXT("spikeA") || ArenaName == TEXT("combat"))
 	{
-		return; // no bots in the toy task
+		return; // the training tasks spawn their own agents and bots
 	}
 	const int32 BaseSeed = FFPSRunArgs::Get().Seed;
 	FActorSpawnParameters Params;

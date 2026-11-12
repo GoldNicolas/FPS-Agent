@@ -33,10 +33,13 @@ public:
 
 	/** -Stage=SpikeA or fps.Stage SpikeA: build the toy reach task instead of the range/map. */
 	static bool WantsSpikeA();
+	/** -Stage=S0..S3 or fps.Stage S0..S3: the combat stage index, else -1. */
+	static int32 RequestedCombatStage();
 
 protected:
 	void BuildRangeArena(UWorld* World);
 	void BuildSpikeA(UWorld* World);
+	void BuildCombat(UWorld* World);
 	bool BuildMapArena(UWorld* World, const FString& SpecName);
 
 	FString ArenaName = TEXT("range");
