@@ -17,7 +17,9 @@
   - +1 per meter closed in a step.
   - −0.5 per second.
   - +5 on reaching the target.
-- **Tuning:** all values are in `UFPSAgentSettings` → `SpikeA` (`DefaultGame.ini`), and they are toy values.
+- **Tuning:** the values are toy values.
+  - They are the **C++ defaults** of `FReachTaskSettings` in `Game/FPSAgent/Source/FPSAgent/Common/FPSAgentTypes.h`, reached through `UFPSAgentSettings::SpikeA`.
+  - `DefaultGame.ini` may override them under `[/Script/FPSAgent.FPSAgentSettings]` with `SpikeA=(...)`, but it holds no overrides today (C-002).
 - **PPO:** Learning Agents defaults (policy 1×128 + GRU 64; LR 1e-4/1e-3; batch 1024/4096; 10 000 steps per iteration), seed = `-Seed`.
 - **The game asks the trainer for:**
   - snapshots every 10 iterations,
@@ -34,6 +36,9 @@ So, judged by the trainer's `Avg Rew Sum` line or the game's `avgReturn`, a lear
 
 ### LOCAL checks done (no training: hard rule 6)
 - 31/31 automation tests pass, including the new `FPSAgent.Learning.Reach.*` and `FPSAgent.Settings.RunArgs`.
+- **Re-run on `a995846`, 2026-11-11:** `tools/run_tests.ps1` gives `Succeeded: 31  Failed: 0  NotRun: 0`, and the mapgen pytest gives `18 passed`.
+  - `git diff cccd809 a995846 -- Game/ tools/ cluster/` is empty, so this is the same game code as `build-cccd809`.
+  - Cradle can't run these tests (no Unreal Engine there), so this is the confirmation.
 - Playback (`-Infer`), scripted and no-trainer runs headless, with the real output above.
 - **No trainer reachable** (`-LearningAgentsPort=1 -LearningAgentsTimeout=5`): the game exits with **code 1 after 26 s** and logs `SpikeA: exiting (code 1): no trainer connection after 20 s (wall clock)`.
 
@@ -58,15 +63,16 @@ So, judged by the trainer's `Avg Rew Sum` line or the game's `avgReturn`, a lear
 This is a sketch. The CLUSTER side owns the real `cluster/slurm/` script.
 
 ```bash
+# Paths per D-021 / docs/cradle.md -> "Our paths": everything under ~/beanRant
 # 0. fetch + verify the build (tag in docs/builds.md)
-gh release download build-<sha> -D ~/fps-agent/builds/<sha> && cd ~/fps-agent/builds/<sha>
+gh release download build-<sha> -D ~/beanRant/builds/<sha> && cd ~/beanRant/builds/<sha>
 sha256sum -c SHA256SUMS && tar xzf FPSAgent-Linux-<sha>.tar.gz && cat Linux/BUILD_INFO.txt
 
 # 1. on a compute node (srun/sbatch, ~15 min, 1 GPU or CPU-only, ~8 cores)
-BUILD=~/fps-agent/builds/<sha>/Linux; REPO=~/fps-agent/repo
-RUN=<weka>/fps-agent/runs/spikeA-$SLURM_JOB_ID; mkdir -p "$RUN"
+BUILD=~/beanRant/builds/<sha>/Linux; REPO=~/beanRant/FPS-Agent
+RUN=~/beanRant/runs/spikeA-$(date +%Y%m%d)-$SLURM_JOB_ID; mkdir -p "$RUN"   # run ID per docs/runs/README.md
 PORT=$((40000 + SLURM_JOB_ID % 20000))
-source ~/miniforge3/bin/activate la-train
+source ~/miniconda3/bin/activate ~/beanRant/envs/la-train
 python3 -u $REPO/cluster/learning_agents_python/train.py FPSAgent -l \
   --nne-cpu-path $REPO/cluster/learning_agents_python/nne_runtime_basic_cpu \
   Socket 127.0.0.1:$PORT "$RUN/trainer" > "$RUN/trainer.log" 2>&1 &
@@ -95,6 +101,65 @@ ls -l "$RUN"/trainer/FPSAgent*/Snapshots/
 - (d) playback with the snapshots reaches targets well above 0%.
 
 Also record: seconds per iteration, agent-steps/s, CPU vs GPU, and the game startup time.
+
+## Expected trainer config (check against the saved JSON)
+The trainer saves the config it received to `$RUN/trainer/FPSAgent0/Configs/FPSAgent_PPO_Socket_<timestamp>.json`. It does so before training starts (`train.py` → `save_config`). **Only the first game that connects** supplies the config. LOCAL derived the values below from `ReachTaskActor.cpp` and the UE 5.7.4 headers (`LearningAgentsPPOTrainer.h/.cpp`). They can only be observed on Cradle: LOCAL may not train (hard rule 6).
+
+**Run-specific values** (Spike A sets these):
+
+| Key (`PPOSettings.*` unless marked top level) | Expected | Set by |
+|---|---|---|
+| `IterationNum` | `150` in run 1, `30` in the resume run (`1000000` without `-Iterations`) | `-Iterations` / `FReachTaskSettings::MaxIterations` |
+| `SaveSnapshots` / `IterationsPerSnapshot` | `true` / `10` | Spike A / `FReachTaskSettings` |
+| `Seed` | the first-connecting game's `-Seed` (`JOBID*1000+0` or `+1`) | Spike A (`RandomSeed = -Seed`) |
+| `Device` (top level) | `"GPU"` (without CUDA, the trainer logs a fallback to CPU and continues) | `FReachTaskSettings::bTrainOnGpu` |
+| `UseTensorBoard` / `UseMLflow` (top level) | `true` / `false` | Spike A |
+| `TrainerMethod`, `CommunicationType`, `TaskName`, `BatchSize` (top level) | `"PPO"`, `"Socket"`, `"FPSAgent"`, `1` | engine / `train.py` (`--batch-size` default) |
+
+**Learning Agents defaults** (Spike A doesn't change these):
+
+| Key | Expected |
+|---|---|
+| `LearningRatePolicy` | `1e-4` |
+| `LearningRateCritic` | `1e-3` |
+| `LearningRateDecay` | `1.0` |
+| `WeightDecay` | `1e-4` |
+| `PolicyBatchSize` | `1024` |
+| `CriticBatchSize` | `4096` |
+| `PolicyWindow` | `16` |
+| `IterationsPerGather` | `32` |
+| `CriticWarmupIterations` | `8` |
+| `EpsilonClip` | `0.2` |
+| `ActionSurrogateWeight` | `1.0` |
+| `ActionRegularizationWeight` | `0.001` |
+| `ActionEntropyWeight` | `0.0` |
+| `ReturnRegularizationWeight` | `1e-4` |
+| `GaeLambda` | `0.95` |
+| `DiscountFactor` | `0.99` |
+| `AdvantageNormalization` | `true` |
+| `AdvantageMin` / `AdvantageMax` | `0.0` / `10.0` |
+| `UseGradNormMaxClipping` / `GradNormMax` | `false` / `0.5` |
+| `TrimEpisodeStartStepNum` / `TrimEpisodeEndStepNum` | `0` / `0` |
+| `ReplayBuffers[0].MaxEpisodeNum` / `MaxStepNum` | `1000` / `10000` (per-iteration recording limits) |
+
+- **Floats are float32 widened to double.** For example, `1e-4` appears as `9.99999974737875e-05`, so compare with a relative tolerance of about 1e-6.
+- **Not in the JSON:**
+  - The episode cap of 360 steps lives on the game side. Check `SpikeA: ready. ... maxEpisodeSteps=360` in `game_0.log`.
+  - The network sizes (policy 1×128 ELU + GRU memory 64; critic 1×128 ELU) are Learning Agents defaults. They arrive as initial weights, not as settings.
+- **The game's side of the handshake:** `game_<i>.log` has `SpikeA: trainer settings: iterations=150 snapshotEvery=10 device=GPU tensorboard=1 seed=<seed>`.
+
+Print the config (`python -I` keeps the run folder off the import path):
+
+```bash
+python -I - "$RUN"/trainer/FPSAgent0/Configs/*.json <<'EOF'
+import json, sys
+c = json.load(open(sys.argv[1]))
+print({k: c.get(k) for k in ("TrainerMethod", "Device", "UseTensorBoard", "UseMLflow", "BatchSize")})
+print(json.dumps(c["PPOSettings"], indent=1))
+EOF
+```
+
+Record mismatches in *Cluster result*. A different value in either table means the game build or the trainer copy isn't what we think it is.
 
 ## Cluster result
 _CLUSTER fills in: PASS / FAIL / PARTIAL with trimmed real output, numbers, and problems._

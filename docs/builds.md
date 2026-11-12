@@ -7,8 +7,8 @@
 - **Publish (LOCAL):** `gh release create build-<sha> <tarball> SHA256SUMS --prerelease --title "build-<sha>" --notes "<summary>"`
 - **Fetch (CLUSTER):**
   ```bash
-  gh release download build-<sha> -D ~/fps-agent/builds/<sha>
-  cd ~/fps-agent/builds/<sha>
+  gh release download build-<sha> -D ~/beanRant/builds/<sha>   # D-021: everything under ~/beanRant
+  cd ~/beanRant/builds/<sha>
   sha256sum -c SHA256SUMS
   tar xzf FPSAgent-Linux-<sha>.tar.gz
   ```
