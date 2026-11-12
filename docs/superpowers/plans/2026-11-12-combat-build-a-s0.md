@@ -50,8 +50,9 @@
 | `Learning/ReachTaskActor.h/.cpp` | modify | Use `UTrainingSession` |
 | `Learning/CombatLearningClasses.h/.cpp` | create | `UCombatInteractor`, `UCombatTrainingEnv` |
 | `Learning/CombatTaskActor.h/.cpp` | create | K arenas, decision cadence, ramp, stats, eval, scripted |
+| `Eval/SpikeCProbe.h/.cpp` | create | `-Stage=SpikeC` headless mechanics probe (C-006) |
 | `Tests/*.cpp` | create/modify | One test file per module (named in each task) |
-| `README.md`, `docs/decisions.md`, spec, `docs/builds.md`, `docs/STATUS.md` | modify | Docs before and after (Task 12) |
+| `README.md`, `docs/decisions.md`, spec, `docs/builds.md`, `docs/STATUS.md` | modify | Docs before and after (Task 13) |
 
 All C++ paths below are relative to `Game/FPSAgent/Source/FPSAgent/`.
 
@@ -92,6 +93,7 @@ git pull --rebase && git push
   - `int32 FFPSRunArgs::CombatStageIndex() const`, `static int32 FFPSRunArgs::CombatStageIndexOf(const FString&)`, `bool IsCombatStage() const`.
 
 - [ ] **Step 1: Write the failing tests.** In `Tests/SettingsTests.cpp`:
+  - Add `#include "LearningAgentsPPOTrainer.h"` below the existing includes (the batch-setting defaults are compared with Learning Agents' own).
   - In `FFPSSettingsDefaultsTest::RunTest`, before `return true;`, add:
 
 ```cpp
@@ -100,6 +102,13 @@ git pull --rebase && git push
 	TestTrue(TEXT("discount in the agreed band"), C.Ppo.Discount >= 0.99f && C.Ppo.Discount <= 0.997f);
 	TestEqual(TEXT("72 rays"), C.Perception.RayYawCount * C.Perception.RayPitchesDeg.Num(), 72);
 	TestEqual(TEXT("clear bonus max 2.0"), C.Reward.ClearBase + C.Reward.ClearSpeed, 2.f);
+	const FLearningAgentsPPOTrainingSettings LaTraining;
+	const FLearningAgentsPPOTrainerSettings LaTrainer;
+	TestEqual(TEXT("iterations per gather = Learning Agents default"), C.Ppo.IterationsPerGather, LaTraining.IterationsPerGather);
+	TestEqual(TEXT("policy batch = Learning Agents default"), C.Ppo.PolicyBatchSize, LaTraining.PolicyBatchSize);
+	TestEqual(TEXT("critic batch = Learning Agents default"), C.Ppo.CriticBatchSize, LaTraining.CriticBatchSize);
+	TestEqual(TEXT("replay steps = Learning Agents default"), C.Ppo.ReplayMaxSteps, LaTrainer.MaximumRecordedStepsPerIteration);
+	TestEqual(TEXT("replay episodes = Learning Agents default"), C.Ppo.ReplayMaxEpisodes, LaTrainer.MaximumRecordedEpisodesPerIteration);
 	TestEqual(TEXT("S0 time limit 20 s"), S.Curriculum.S0.TimeLimitSeconds, 20.f);
 	TestFalse(TEXT("S0 agent can't move"), S.Curriculum.S0.bAgentCanMove);
 	TestTrue(TEXT("arenas at least floor + 50 m apart"),
@@ -179,6 +188,13 @@ struct FCombatPpoSettings
 	UPROPERTY(EditAnywhere, Category="PPO") float EntropyWeight = 0.f;
 	UPROPERTY(EditAnywhere, Category="PPO") float LearningRatePolicy = 0.0001f;
 	UPROPERTY(EditAnywhere, Category="PPO") float LearningRateCritic = 0.001f;
+	/** Gradient work per update (Learning Agents defaults). Scale with the number of games via -Set=Combat.Ppo.* (C-007, Spike B). */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 IterationsPerGather = 32;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 PolicyBatchSize = 1024;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 CriticBatchSize = 4096;
+	/** Experience per update: the replay buffer is sent when either limit is reached (Learning Agents defaults; C-007). */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 ReplayMaxSteps = 10000;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 ReplayMaxEpisodes = 1000;
 	/** Policy and critic: HiddenLayers x HiddenSize; policy memory MemorySize. Changing them breaks resume from older snapshots. */
 	UPROPERTY(EditAnywhere, Category="PPO") int32 HiddenLayers = 2;
 	UPROPERTY(EditAnywhere, Category="PPO") int32 HiddenSize = 256;
@@ -2422,7 +2438,8 @@ git pull --rebase && git push
 
 **Files:**
 - Create: `Learning/CombatArena.h`, `Learning/CombatArena.cpp`
-- Test: `Tests/CombatArenaTests.cpp`
+- Modify: `Weapons/CombatMath.cpp` (cap the reported health damage at the health that was left, Step 2b)
+- Test: `Tests/CombatArenaTests.cpp`, `Tests/CombatMathTests.cpp`
 
 **Interfaces:**
 - Consumes:
@@ -2601,6 +2618,27 @@ bool FFPSCombatArenaObservationTest::RunTest(const FString& Parameters)
 ```
 
 - [ ] **Step 2: Build to verify it fails.** Run `powershell -File tools/build.ps1`. Expected: `cannot open include file: 'Learning/CombatArena.h'`.
+
+- [ ] **Step 2b: Report only the damage actually removed (spec §3).** Today `FPSCombat::ApplyDamage` reports `DamageToHealth = Damage - DamageToArmor` even past 0 health: a 160 headshot on 100 + 50 reports 110 + 50. The damage-dealt reward must be "health plus armor actually removed", which is 1.0 for a kill from full.
+  - In `Tests/CombatMathTests.cpp`, add a test:
+
+```cpp
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSApplyDamageOverkillTest, "FPSAgent.Combat.ApplyDamageOverkill",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSApplyDamageOverkillTest::RunTest(const FString& Parameters)
+{
+	const FPSCombat::FDamageResult R = FPSCombat::ApplyDamage(100.f, 50.f, 160.f, 1.f);
+	TestEqual(TEXT("armor removed"), R.DamageToArmor, 50.f);
+	TestEqual(TEXT("health removed is capped at what was left"), R.DamageToHealth, 100.f);
+	TestTrue(TEXT("killed"), R.bKilled);
+	const FPSCombat::FDamageResult Partial = FPSCombat::ApplyDamage(100.f, 0.f, 40.f, 1.f);
+	TestEqual(TEXT("non-lethal hit unchanged"), Partial.DamageToHealth, 40.f);
+	return true;
+}
+```
+
+  - Then, in `Weapons/CombatMath.cpp` → `ApplyDamage`, change `R.DamageToHealth = Damage - R.DamageToArmor;` to `R.DamageToHealth = FMath::Min(Damage - R.DamageToArmor, Health); // only what was actually removed (spec §3)`.
+  - The only other reader is `UHealthComponent::ApplyHit`, which checks `> 0`; that's unaffected.
 
 - [ ] **Step 3: Implement** `Learning/CombatArena.h`:
 
@@ -3174,7 +3212,7 @@ void UCombatArena::OnBotDied(UHealthComponent* Victim, AActor* Killer)
 - [ ] **Step 6: Commit**
 
 ```bash
-git add Game/FPSAgent/Source/FPSAgent/Learning/CombatArena.* Game/FPSAgent/Source/FPSAgent/Tests/CombatArenaTests.cpp
+git add Game/FPSAgent/Source/FPSAgent/Learning/CombatArena.* Game/FPSAgent/Source/FPSAgent/Weapons/CombatMath.cpp Game/FPSAgent/Source/FPSAgent/Tests/CombatArenaTests.cpp Game/FPSAgent/Source/FPSAgent/Tests/CombatMathTests.cpp
 git commit -m "[local] UCombatArena: S0 floor, agent + bot pool, events -> reward ledger, state-only episode end (death beats clear), fair observation, scripted action"
 git pull --rebase && git push
 ```
@@ -3978,7 +4016,12 @@ void ACombatTaskActor::BeginPlay()
 		Config.Critic.HiddenLayerSize = Ppo.HiddenSize;
 		// Our own timeout (Truncation) fires first; this cap only guards against a stuck episode.
 		Config.Trainer.MaxEpisodeStepNum = FMath::CeilToInt(S.Curriculum.S0.TimeLimitSeconds / DecisionSeconds) + 2;
+		Config.Trainer.MaximumRecordedStepsPerIteration = FMath::Max(1, Ppo.ReplayMaxSteps);
+		Config.Trainer.MaximumRecordedEpisodesPerIteration = FMath::Max(1, Ppo.ReplayMaxEpisodes);
 		FLearningAgentsPPOTrainingSettings& T = Config.Training;
+		T.IterationsPerGather = FMath::Max(1, Ppo.IterationsPerGather); // before converting -Batches (C-007)
+		T.PolicyBatchSize = FMath::Max(1, Ppo.PolicyBatchSize);
+		T.CriticBatchSize = FMath::Max(1, Ppo.CriticBatchSize);
 		T.NumberOfIterations = Args.GradientIterations(T.IterationsPerGather, Ppo.MaxIterations);
 		T.bSaveSnapshots = true;
 		T.IterationsPerSnapshot = FMath::Max(1, Ppo.IterationsPerSnapshot);
@@ -4271,7 +4314,7 @@ void AArenaGameMode::BuildCombat(UWorld* World)
 
 - [ ] **Step 4: Build and run all tests.** Run `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1`. Expected: `Failed: 0`.
 
-- [ ] **Step 5: Headless verification (no training).** Run these and keep the real output for Task 12:
+- [ ] **Step 5: Headless verification (no training).** Run these and keep the real output for Task 13:
 
 ```powershell
 $ue = "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
@@ -4306,7 +4349,7 @@ Get-Process UnrealEditor* -ErrorAction SilentlyContinue | Stop-Process -Force
     - (c) `CombatStats` lines and no `LogLearning: Error`.
     - (d) `exit=1`.
     - (e) all three `exit=2`.
-  - Note (a)'s clear rate and the episode time; Task 12 records them as the S0 reference numbers.
+  - Note (a)'s clear rate and the episode time; Task 13 records them as the S0 reference numbers.
   - **If (a) clears little:** look at `acc=` and `hs=` first. A head-height or eye-height mismatch shows up as many shots and few hits; fix it in `UCombatArena`/`ScriptedAction`, not in the reward.
 
 - [ ] **Step 6: Watch it once in the editor (optional, visual).**
@@ -4324,7 +4367,370 @@ git pull --rebase && git push
 
 ---
 
-### Task 12: Document, package and ship build A
+### Task 12: `-Stage=SpikeC` headless mechanics probe (request C-006)
+
+**Why:**
+- Spike C on the cluster confirmed the fixed 60 Hz step, the uncapped tick and run speed.
+- It could not measure walk/crouch speed or fire rate: no headless code path walks, crouches or fires, and our automation tests are editor-only.
+- This probe is option (a) of C-006. It ships in build A, so the cluster can rerun Spike C without waiting for another build.
+
+**Files:**
+- Create: `Eval/SpikeCProbe.h`, `Eval/SpikeCProbe.cpp`
+- Modify: `Common/FPSRunArgs.h` (`IsSpikeC()`), `Arena/ArenaGameMode.h/.cpp` (dispatch), `Tests/SettingsTests.cpp` (one assertion)
+
+**Interfaces:**
+- Consumes:
+  - `FPSArena::MakeOpenFloorSpec` and `FPSArena::BuildMap` (Task 6 and existing);
+  - `ABeanAIController` (Task 6);
+  - `UTrainingSession::ExitProcess` (Task 10);
+  - `URifleComponent::OnShotFired` (existing).
+- Produces:
+  - `ASpikeCProbe`;
+  - `bool FFPSRunArgs::IsSpikeC() const`;
+  - `static bool AArenaGameMode::WantsSpikeC()`.
+- Log lines (for the cluster):
+  - `SpikeC probe: started (tick ... s, fixed step 1)`;
+  - `SpikeC probe: run=... (cfg ...) walk=... (cfg ...) crouch=... (cfg ...) cm/s; fireRate=... (cfg ...) rounds/s over N shots; taps=T/T; tick=... s; verdict=PASS|MISMATCH`;
+  - `SpikeC: exiting (code 0): probe finished: PASS|MISMATCH ...`.
+
+- [ ] **Step 1: Write the failing assertion.** In `Tests/SettingsTests.cpp` → `FFPSRunArgsTest`, before `return true;`, add:
+
+```cpp
+	TestTrue(TEXT("SpikeC probe stage"), FFPSRunArgs::Parse(TEXT("-Stage=spikec")).IsSpikeC());
+	TestFalse(TEXT("SpikeC is not combat"), FFPSRunArgs::Parse(TEXT("-Stage=SpikeC")).IsCombatStage());
+	TestFalse(TEXT("no stage: not the probe"), D.IsSpikeC());
+```
+
+- [ ] **Step 2: Build to verify it fails.** Run `powershell -File tools/build.ps1`. Expected: `'IsSpikeC': is not a member of 'FFPSRunArgs'`.
+
+- [ ] **Step 3: Add the argument.** In `Common/FPSRunArgs.h`, after `IsSpikeA()`, add:
+
+```cpp
+	/** -Stage=SpikeC: the headless mechanics probe (C-006). */
+	bool IsSpikeC() const { return Stage.Equals(TEXT("SpikeC"), ESearchCase::IgnoreCase); }
+```
+
+- [ ] **Step 4: Write the probe.** `Eval/SpikeCProbe.h`:
+
+```cpp
+#pragma once
+
+#include "CoreMinimal.h"
+#include "GameFramework/Actor.h"
+#include "SpikeCProbe.generated.h"
+
+class ABeanCharacter;
+struct FShotResult;
+
+/**
+ * -Stage=SpikeC (request C-006): measures movement and rifle mechanics headless, in the packaged game, at the fixed
+ * 60 Hz step used for training. One bean on an open floor:
+ * - runs, walks and crouches in straight lines; the speed is averaged over the last second of each 3 s phase;
+ * - holds the trigger: rounds/s over the first 20 shots;
+ * - taps 8 times: shots per tap.
+ * It logs measured vs configured values with a verdict, then exits 0. Pure measurement: no learning.
+ */
+UCLASS()
+class FPSAGENT_API ASpikeCProbe : public AActor
+{
+	GENERATED_BODY()
+
+public:
+	ASpikeCProbe();
+
+protected:
+	virtual void BeginPlay() override;
+	virtual void Tick(float DeltaSeconds) override;
+
+private:
+	enum class EPhase : uint8 { Settle, Run, Walk, Crouch, Stop, Hold, Taps, Done };
+
+	void Enter(EPhase Next);
+	void MoveAndMeasure(double PhaseTime, float& OutSpeed, EPhase Next);
+	void OnShot(const FShotResult& Shot);
+	void Finish();
+
+	UPROPERTY() TObjectPtr<ABeanCharacter> Bean;
+
+	EPhase Phase = EPhase::Settle;
+	float TickSeconds = 1.f / 60.f;
+	double PhaseStart = 0.0;
+	double SpeedSum = 0.0;
+	int32 SpeedSamples = 0;
+	float RunSpeed = 0.f;
+	float WalkSpeed = 0.f;
+	float CrouchSpeed = 0.f;
+	TArray<double> HoldShotTimes;
+	int32 TapsRequested = 0;
+	int32 TapShots = 0;
+	double NextTapTime = 0.0;
+	bool bTapHeld = false;
+};
+```
+
+`Eval/SpikeCProbe.cpp`:
+
+```cpp
+#include "Eval/SpikeCProbe.h"
+#include "Arena/FloorGenerator.h"
+#include "Arena/MapBuilder.h"
+#include "Character/BeanAIController.h"
+#include "Character/BeanCharacter.h"
+#include "Common/FPSAgentSettings.h"
+#include "Engine/World.h"
+#include "FPSAgent.h"
+#include "HAL/IConsoleManager.h"
+#include "Learning/TrainingSession.h"
+#include "LearningAgentsTrainer.h"
+#include "Misc/App.h"
+#include "Weapons/RifleComponent.h"
+
+namespace
+{
+	// The probe procedure (not mechanics): phase lengths, how many shots and taps are measured, and the pass tolerance.
+	constexpr int32 ProbeFloorTiles = 20;        // 80 m floor
+	constexpr float StartBackCm = 3000.f;        // start 30 m behind the centre; the three move phases cover about 31 m
+	constexpr double SettleSeconds = 0.5;
+	constexpr double MovePhaseSeconds = 3.0;
+	constexpr double MeasureSeconds = 1.0;       // average speed over the last second of each move phase
+	constexpr double StopSeconds = 1.0;
+	constexpr double HoldSeconds = 3.0;
+	constexpr int32 FireRateShots = 20;          // fewer than the 25-round magazine
+	constexpr int32 TapCount = 8;
+	constexpr double TapIntervalSeconds = 0.5;   // far slower than the fire rate: every tap should fire exactly one shot
+	constexpr double ToleranceFraction = 0.02;   // 60 Hz tick quantisation is under 1% over 20 shots
+}
+
+ASpikeCProbe::ASpikeCProbe()
+{
+	PrimaryActorTick.bCanEverTick = true;
+	RootComponent = CreateDefaultSubobject<USceneComponent>(TEXT("Root"));
+}
+
+void ASpikeCProbe::BeginPlay()
+{
+	Super::BeginPlay();
+	TickSeconds = 1.f / FMath::Max(1.f, FLearningAgentsTrainingGameSettings().FixedTimeStepFrequency);
+	if (!GIsEditor)
+	{
+		// The same fixed step as training and headless playback (D-019), uncapped.
+		FApp::SetUseFixedTimeStep(true);
+		FApp::SetFixedDeltaTime(TickSeconds);
+		if (IConsoleVariable* MaxFps = IConsoleManager::Get().FindConsoleVariable(TEXT("t.MaxFPS"))) { MaxFps->Set(0.f); }
+	}
+	const FMapSpec Spec = FPSArena::MakeOpenFloorSpec(ProbeFloorTiles, TEXT("spikeC"));
+	FPSArena::BuildMap(GetWorld(), Spec, GetActorLocation() - Spec.Center());
+
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	const FVector Start = GetActorLocation() + FVector(-StartBackCm, 0.0, UFPSAgentSettings::Get().Body.StandingHalfHeight + 2.f);
+	Bean = GetWorld()->SpawnActor<ABeanCharacter>(Start, FRotator::ZeroRotator, Params);
+	if (!Bean)
+	{
+		UTrainingSession::ExitProcess(TEXT("SpikeC"), 1, TEXT("could not spawn the probe bean"));
+		Phase = EPhase::Done;
+		return;
+	}
+	Bean->AIControllerClass = ABeanAIController::StaticClass();
+	Bean->SpawnDefaultController(); // CharacterMovement only simulates controlled pawns
+	Bean->GetRifle()->OnShotFired.AddUObject(this, &ASpikeCProbe::OnShot);
+	Enter(EPhase::Settle);
+	UE_LOG(LogFPSAgent, Display, TEXT("SpikeC probe: started (tick %.5f s, fixed step %d)"), TickSeconds, FApp::UseFixedTimeStep() ? 1 : 0);
+}
+
+void ASpikeCProbe::Enter(EPhase Next)
+{
+	Phase = Next;
+	PhaseStart = GetWorld()->GetTimeSeconds();
+	SpeedSum = 0.0;
+	SpeedSamples = 0;
+	URifleComponent* Rifle = Bean->GetRifle();
+	switch (Next)
+	{
+	case EPhase::Walk:
+		Bean->SetWalking(true);
+		break;
+	case EPhase::Crouch:
+		Bean->SetWalking(false);
+		Bean->Crouch();
+		break;
+	case EPhase::Stop:
+		Bean->UnCrouch();
+		break;
+	case EPhase::Hold:
+		HoldShotTimes.Reset();
+		Rifle->ResetWeapon();
+		Rifle->SetTriggerHeld(true);
+		break;
+	case EPhase::Taps:
+		Rifle->ResetWeapon(); // full magazine, trigger released
+		TapsRequested = 0;
+		TapShots = 0;
+		bTapHeld = false;
+		NextTapTime = PhaseStart + TapIntervalSeconds;
+		break;
+	default:
+		break;
+	}
+}
+
+void ASpikeCProbe::MoveAndMeasure(double PhaseTime, float& OutSpeed, EPhase Next)
+{
+	Bean->AddMovementInput(FVector::ForwardVector, 1.f);
+	if (PhaseTime >= MovePhaseSeconds - MeasureSeconds)
+	{
+		SpeedSum += Bean->GetHorizontalSpeed();
+		++SpeedSamples;
+	}
+	if (PhaseTime >= MovePhaseSeconds)
+	{
+		OutSpeed = SpeedSamples > 0 ? static_cast<float>(SpeedSum / SpeedSamples) : 0.f;
+		Enter(Next);
+	}
+}
+
+void ASpikeCProbe::Tick(float DeltaSeconds)
+{
+	Super::Tick(DeltaSeconds);
+	if (!Bean || Phase == EPhase::Done)
+	{
+		return;
+	}
+	const double Now = GetWorld()->GetTimeSeconds();
+	const double T = Now - PhaseStart;
+	switch (Phase)
+	{
+	case EPhase::Settle: if (T >= SettleSeconds) { Enter(EPhase::Run); } break;
+	case EPhase::Run:    MoveAndMeasure(T, RunSpeed, EPhase::Walk); break;
+	case EPhase::Walk:   MoveAndMeasure(T, WalkSpeed, EPhase::Crouch); break;
+	case EPhase::Crouch: MoveAndMeasure(T, CrouchSpeed, EPhase::Stop); break;
+	case EPhase::Stop:   if (T >= StopSeconds) { Enter(EPhase::Hold); } break;
+	case EPhase::Hold:   if (T >= HoldSeconds) { Enter(EPhase::Taps); } break;
+	case EPhase::Taps:
+		if (bTapHeld)
+		{
+			Bean->GetRifle()->SetTriggerHeld(false); // a tap is one tick of trigger
+			bTapHeld = false;
+		}
+		else if (TapsRequested < TapCount && Now >= NextTapTime)
+		{
+			Bean->GetRifle()->SetTriggerHeld(true);
+			bTapHeld = true;
+			++TapsRequested;
+			NextTapTime = Now + TapIntervalSeconds;
+		}
+		else if (TapsRequested >= TapCount && Now >= NextTapTime)
+		{
+			Finish();
+		}
+		break;
+	default:
+		break;
+	}
+}
+
+void ASpikeCProbe::OnShot(const FShotResult& Shot)
+{
+	if (Phase == EPhase::Hold)
+	{
+		HoldShotTimes.Add(GetWorld()->GetTimeSeconds());
+	}
+	else if (Phase == EPhase::Taps)
+	{
+		++TapShots;
+	}
+}
+
+void ASpikeCProbe::Finish()
+{
+	Phase = EPhase::Done;
+	const UFPSAgentSettings& S = UFPSAgentSettings::Get();
+	const int32 N = FMath::Min(HoldShotTimes.Num(), FireRateShots);
+	const double Span = N >= 2 ? HoldShotTimes[N - 1] - HoldShotTimes[0] : 0.0;
+	const double FireRate = Span > 0.0 ? (N - 1) / Span : 0.0;
+	auto Within = [](double Measured, double Config) { return FMath::Abs(Measured - Config) <= ToleranceFraction * FMath::Max(1e-6, FMath::Abs(Config)); };
+	const bool bPass = Within(RunSpeed, S.Movement.RunSpeed) && Within(WalkSpeed, S.Movement.WalkSpeed)
+		&& Within(CrouchSpeed, S.Movement.CrouchSpeed) && Within(FireRate, S.Rifle.FireRate) && TapShots == TapsRequested;
+	UE_LOG(LogFPSAgent, Display, TEXT("SpikeC probe: run=%.2f (cfg %.2f) walk=%.2f (cfg %.2f) crouch=%.2f (cfg %.2f) cm/s; fireRate=%.3f (cfg %.3f) rounds/s over %d shots; taps=%d/%d; tick=%.5f s; verdict=%s"),
+		RunSpeed, S.Movement.RunSpeed, WalkSpeed, S.Movement.WalkSpeed, CrouchSpeed, S.Movement.CrouchSpeed,
+		FireRate, S.Rifle.FireRate, N, TapShots, TapsRequested, TickSeconds, bPass ? TEXT("PASS") : TEXT("MISMATCH"));
+	UTrainingSession::ExitProcess(TEXT("SpikeC"), 0, bPass ? TEXT("probe finished: PASS") : TEXT("probe finished: MISMATCH (see the probe line)"));
+}
+```
+
+- [ ] **Step 5: Dispatch it in the game mode.**
+  - In `Arena/ArenaGameMode.h`:
+    - after `RequestedCombatStage()`, add `static bool WantsSpikeC();` with the comment `/** -Stage=SpikeC or fps.Stage SpikeC: the headless mechanics probe (C-006). */`;
+    - under `protected:`, add `void BuildSpikeC(UWorld* World);`.
+  - In `Arena/ArenaGameMode.cpp`:
+    1. Add `#include "Eval/SpikeCProbe.h"`.
+    2. Add:
+
+```cpp
+bool AArenaGameMode::WantsSpikeC()
+{
+	return FFPSRunArgs::Get().IsSpikeC() || CVarStage.GetValueOnGameThread().Equals(TEXT("SpikeC"), ESearchCase::IgnoreCase);
+}
+
+void AArenaGameMode::BuildSpikeC(UWorld* World)
+{
+	// The probe builds its own floor and bean; the local player only watches.
+	ArenaName = TEXT("spikeC");
+	bStartPlayersAsSpectators = true;
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	World->SpawnActor<ASpikeCProbe>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	Bounds = FBox(FVector(-4400.0, -4400.0, 0.0), FVector(4400.0, 4400.0, 600.0));
+	PlayerStart = World->SpawnActor<APlayerStart>(FVector(-3000.0, -1500.0, 800.0), FRotator(-25.0, 45.0, 0.0), Params);
+}
+```
+
+    3. In `InitGame`, right after the SpikeA block, add:
+
+```cpp
+	if (WantsSpikeC())
+	{
+		BuildSpikeC(GetWorld());
+		FPSArena::SpawnPreviewLighting(GetWorld());
+		UE_LOG(LogFPSAgent, Log, TEXT("ArenaGameMode: arena=%s %s"), *ArenaName, *Args.ToString());
+		return;
+	}
+```
+
+    4. In `StartPlay`, extend the early return to `ArenaName == TEXT("spikeA") || ArenaName == TEXT("combat") || ArenaName == TEXT("spikeC")`.
+
+- [ ] **Step 6: Build, test, and run the probe headless.**
+  - Run `powershell -File tools/build.ps1`, then `powershell -File tools/run_tests.ps1 -Filter "FPSAgent.Settings"`. Expected: `Failed: 0`.
+  - Then:
+
+```powershell
+$ue = "C:\Program Files\Epic Games\UE_5.7\Engine\Binaries\Win64\UnrealEditor-Cmd.exe"
+$proj = "$PWD\Game\FPSAgent\FPSAgent.uproject"
+$log = "$env:TEMP\spikec.log"
+$p = Start-Process $ue "`"$proj`" -game -nullrhi -nosound -unattended -Stage=SpikeC -abslog=`"$log`"" -PassThru -WindowStyle Hidden
+$p.WaitForExit(180000); "exit=$($p.ExitCode)"
+Select-String $log -Pattern "SpikeC" | ForEach-Object { $_.Line.Substring($_.Line.IndexOf('SpikeC')) }
+```
+
+  - Expected:
+    - `exit=0`;
+    - `run≈540 walk≈300 crouch≈190`;
+    - `fireRate≈9.75`;
+    - `taps=8/8`;
+    - `verdict=PASS`.
+  - **If a value is off:** report it as found (that's what the probe is for). Don't tune the probe to make it pass. Record the real line for Task 13; the cluster compares it against the Linux run.
+
+- [ ] **Step 7: Commit**
+
+```bash
+git add Game/FPSAgent/Source/FPSAgent/Eval Game/FPSAgent/Source/FPSAgent/Common/FPSRunArgs.h Game/FPSAgent/Source/FPSAgent/Arena/ArenaGameMode.* Game/FPSAgent/Source/FPSAgent/Tests/SettingsTests.cpp
+git commit -m "[local] -Stage=SpikeC headless mechanics probe (C-006): run/walk/crouch speeds, hold fire rate, taps; logs measured vs config and exits 0"
+git pull --rebase && git push
+```
+
+---
+
+### Task 13: Document, package and ship build A
 
 **Files:**
 - Modify: `README.md`, `docs/decisions.md`, `docs/superpowers/specs/2026-11-12-combat-training-design.md`, `docs/builds.md`, `docs/STATUS.md`
@@ -4337,6 +4743,12 @@ git pull --rebase && git push
 | `-Eval` | Promotion test (implies `-Infer`): `-EvalEpisodes=N` (default 200) fixed-seed episodes at `-StartDifficulty`, mean actions, no ramp, no review episodes. Writes `-EvalJson=<path>`, logs `CombatEval: {...}`, exits 0. Needs `-ResumeFrom` unless `-Scripted`. |
 | `-StatsCsv=<path>` | One CSV row per stats window: clear/death/timeout rates, average return, every reward term, accuracy, headshot rate, clear time, ramp level (mean/min/max), decisions/s. |
 | `-Set=Path=Value;...` | Override any setting at startup, e.g. `-Set="Combat.Reward.Kill=1.5;Combat.Ppo.Discount=0.997"` (D-025). Logged as `Settings overrides (-Set): ...`. An unknown path or bad value exits with code 2. Changing ray counts or network sizes changes the network, so older snapshots can't be resumed. |
+```
+
+  Also add this row:
+
+```markdown
+| `-Stage=SpikeC` | Headless mechanics probe (C-006): one bean runs, walks and crouches (speed over the last second of each 3 s phase), then holds the trigger (rounds/s over 20 shots) and taps 8 times. Logs `SpikeC probe: run=... (cfg ...) ... verdict=PASS|MISMATCH` and exits 0. |
 ```
 
   Then make these edits:
@@ -4391,6 +4803,14 @@ git pull --rebase && git push
 | L-007 | 2026-11-12 | **Combat build A (S0 aim gallery) on `build-<sha>`.** (1) Smoke: 2 games × 16 arenas, `-Stage=S0 -Batches=3 -StatsCsv=...`; expect `Combat: ready`, `CombatStats` lines and the 4 snapshots. (2) **Spike B on the combat build:** N games × K arenas (e.g. N ∈ {4, 8, 16}, K ∈ {8, 16, 32}) with `--batch-size N`; record decisions/s, seconds per batch and GPU use; pick defaults. (3) **S0 training:** chained jobs with `-Batches`, `-ResumeFrom=<previous snapshots>` and `-StartDifficulty=<last mean level>`, `-StatsCsv`. Promote when the mean `level=` stays ≥ 0.9 for 10 windows. (4) **Promotion test:** `-Eval -EvalEpisodes=200 -StartDifficulty=1 -Seed=1000 -ResumeFrom=<snapshots> -EvalJson=...`, plus the reference `-Scripted -Eval` with the same seed. Pass = clear rate ≥ 70%. Report in `docs/runs/`, publish the promoted snapshot as `run-<id>`. New args and log lines: README → *Game command-line arguments*. Sweeps can use `-Set=` (D-025). | open | |
 ```
 
+  - Also in `docs/STATUS.md`, answer the CLUSTER requests (Status/Answer cells only):
+    - **C-006 → done:** `-Stage=SpikeC` probe in the new build. Paste the local probe line from Task 12 Step 6 and ask CLUSTER to rerun Spike C with it.
+    - **C-007 → done for (2) and (3); (1) waits on the user:**
+      - (2) `Combat.Ppo.IterationsPerGather`, `PolicyBatchSize`, `CriticBatchSize`, `ReplayMaxSteps` and `ReplayMaxEpisodes` are settings, sweepable with `-Set=`.
+      - (3) The 5.7 trainer only puts *finished* episodes into the replay buffer (`ULearningAgentsPPOTrainer::ProcessExperience`). It adds whole episodes while they fit, then one truncated part (`FReplayBuffer::AddEpisodes`), then sends. With `bResetAgentsOnUpdate=false` (D-026), unfinished episodes stay in the per-agent episode buffer across the update and are added when they end. S0 episodes are at most 300 decisions (20 s × 15 Hz), so 32 arenas give about 9,600 steps per round, under `ReplayMaxSteps` 10,000. Raise `ReplayMaxSteps` for longer stages or more arenas.
+      - (1) The poll patch changes Epic's verbatim trainer files, so it is the user's decision; say so.
+  - In `docs/builds.md`, change the `build-07eac52` status to `runs on Linux (L-005, Spike B/C)`.
+
 - [ ] **Step 7: Commit and push**
 
 ```bash
@@ -4413,11 +4833,12 @@ git pull --rebase && git push
   - Static bots → Task 6
   - `-Scripted`, `-Eval`, `-Set`, `-StatsCsv`, `-StartDifficulty` → Tasks 1, 2, 7, 8, 11
   - tests → every task
+  - C-006 (SpikeC probe) → Task 12; C-007 (2) batch settings → Tasks 1 and 11; C-007 (3) answered in Task 13
   - docs before and after → Tasks 0, 12
   - D-022 (state-only completion) → Tasks 9 and 11 (`GetEpisodeEnd`, env completion)
   - death beats a clear → Task 9 test
   - geometry-only rays and line of sight → Task 5 world test
-- **Deferred, with a reason recorded in the spec (Task 12):** human-likeness reaction delay and aim noise. No layout impact.
+- **Deferred, with a reason recorded in the spec (Task 13):** human-likeness reaction delay and aim noise. No layout impact.
 - **Type consistency:** names used across tasks have been checked against their definitions:
   - `FPSCombatObs::FObservationData` / `FAgentAction` / `ScriptedAction`
   - `UCombatArena::ScriptedAction(float)`
