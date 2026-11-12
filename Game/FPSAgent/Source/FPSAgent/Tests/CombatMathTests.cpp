@@ -44,4 +44,17 @@ bool FFPSApplyDamageTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSApplyDamageOverkillTest, "FPSAgent.Combat.ApplyDamageOverkill",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSApplyDamageOverkillTest::RunTest(const FString& Parameters)
+{
+	const FPSCombat::FDamageResult R = FPSCombat::ApplyDamage(100.f, 50.f, 160.f, 1.f);
+	TestEqual(TEXT("armor removed"), R.DamageToArmor, 50.f);
+	TestEqual(TEXT("health removed is capped at what was left"), R.DamageToHealth, 100.f);
+	TestTrue(TEXT("killed"), R.bKilled);
+	const FPSCombat::FDamageResult Partial = FPSCombat::ApplyDamage(100.f, 0.f, 40.f, 1.f);
+	TestEqual(TEXT("non-lethal hit unchanged"), Partial.DamageToHealth, 40.f);
+	return true;
+}
+
 #endif

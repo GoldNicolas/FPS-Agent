@@ -24,7 +24,7 @@ FDamageResult ApplyDamage(float Health, float Armor, float Damage, float ArmorAb
 	}
 	const float Absorb = FMath::Clamp(ArmorAbsorbFraction, 0.f, 1.f);
 	R.DamageToArmor = FMath::Min(FMath::Max(Armor, 0.f), Damage * Absorb);
-	R.DamageToHealth = Damage - R.DamageToArmor;
+	R.DamageToHealth = FMath::Min(Damage - R.DamageToArmor, Health); // only what was actually removed (spec §3)
 	R.Armor = Armor - R.DamageToArmor;
 	R.Health = FMath::Max(0.f, Health - R.DamageToHealth);
 	R.bKilled = R.Health <= 0.f;
