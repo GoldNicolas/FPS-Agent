@@ -1,0 +1,12 @@
+549c549
+<                     time.sleep(1)
+---
+>                     time.sleep(0.01)
+665c665
+<             time.sleep(1)
+---
+>             time.sleep(0.05)
+684c684
+<                     time.sleep(1)
+---
+>                     time.sleep(0.01)

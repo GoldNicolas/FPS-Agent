@@ -527,7 +527,7 @@ These are the official Learning Agents scale-out flags from Epic's *Scaling Out 
 #SBATCH -N 1
 #SBATCH -p gpuq                     # docs/cradle.md
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=<cores>     # whole node if allowed
+#SBATCH --cpus-per-task=8           # ~2 cores per game process (Spike B, D-027)
 #SBATCH --mem=<GB>G                 # not enforced (CR_CORE), but documents the need
 #SBATCH --time=<hh:mm:ss>           # always set: gpuq has no time limit
 #SBATCH --signal=B:USR1@300         # warning before walltime, so we can stop cleanly
@@ -538,14 +538,14 @@ REPO=~/beanRant/FPS-Agent
 BUILD=~/beanRant/builds/$BUILD_SHA/Linux
 RUN=~/beanRant/runs/$SLURM_JOB_ID; mkdir -p "$RUN"
 PORT=$((40000 + SLURM_JOB_ID % 20000))     # unique per job: no collisions
-NUM_GAMES=${NUM_GAMES:-16}                  # ~3 cores per game process (tune in Spike B)
-ARENAS=${ARENAS:-16}                        # arenas (= agents) per process (tune in Spike B)
+NUM_GAMES=${NUM_GAMES:-4}                   # Spike B / D-027: the trainer, not the games, sets the pace
+ARENAS=${ARENAS:-32}                        # arenas (= agents) per process; K x episode length must fit MaxStepNum
 
 unset PYTHONPATH PYTHONHOME VIRTUAL_ENV            # inherited from the login shell (docs/cradle.md)
 PY=~/beanRant/envs/la-train/bin/python             # full path: `activate` isn't enough on this account
 "$PY" -s -u $REPO/cluster/learning_agents_python/train.py FPSAgent -l \
   --nne-cpu-path $REPO/cluster/learning_agents_python/nne_runtime_basic_cpu \
-  Socket 127.0.0.1:$PORT "$RUN/trainer" > "$RUN/trainer.log" 2>&1 &
+  Socket 127.0.0.1:$PORT "$RUN/trainer" --batch-size $NUM_GAMES > "$RUN/trainer.log" 2>&1 &   # batch size 1 drops (N-1)/N of the experience
 # Wait for the listener. Never probe the port: a connect+close wedges the trainer.
 until grep -q "Server listening on" "$RUN/trainer.log"; do sleep 1; done
 

@@ -222,7 +222,10 @@ SpikeA: exiting (code 0): trainer finished
    - Inside the build folder: `Saved/` and `Intermediate/`.
    - Nothing lands in the real `~/.config`.
    - A harmless warning: `sh: xdg-user-dir: command not found`.
-5. **A CLUSTER script issue, already noted:** in playback mode the script's summary lines after `timeout` didn't print. The job ends together with the game. The numbers above come from each run's `eval.log`. This will be fixed in the script before Spike B.
+5. **A CLUSTER script issue (corrected and fixed 2026-11-12).** In playback mode the summary lines *did* print, but they were buried under the engine's late output. The real problem:
+   - `FPSAgent.sh` doesn't `exec` the engine. When `timeout` fires, the `sh` wrapper dies at once, so `timeout` returns while the engine is still shutting down.
+   - The script then ended, and Slurm killed the engine mid-exit, so each `eval.log` lost its last lines.
+   - **Fix:** `spikeA.sbatch` now waits until `timeout`'s process group is empty, and sends the engine's stdout to `eval.stdout`. The L-005 playback jobs end cleanly with `Log file closed`.
 
 ## LOCAL fixes after the cluster result (2026-11-12, `build-07eac52`)
 - **C-004, root cause.** The bug was in our game code, not the engine.
@@ -244,6 +247,27 @@ SpikeA: exiting (code 0): trainer finished
   - With 10, it is at most 9 iterations old.
 - **C-003.** The procedure above calls la-train's python by full path and points to `spikeA.sbatch`.
 
+## L-005: CLUSTER confirmation on `build-07eac52` (2026-11-12)
+**PASS.** Training returns now match playback, and `-Batches=` works.
+
+| Job | What | Result |
+|---|---|---|
+| 151806 | `spikeA.sbatch`, `BATCHES=30`: 2 games × 16 arenas, GPU | Both games log `iterations=960 (= 30.0 batches of 32)`; 30 `Iter` lines; all exits 0; 131 s (4.0 s per batch, as before). `Avg Rew Sum` −3.04 → **+10.13** (mean of batches 25–29: **+10.02**, against +15.14 for the same batches of run 1b on `cccd809`). |
+| 151807 | `-Infer` playback of 151806's final snapshots, 60 s, CPU | 100.0% reached, avgReturn **+10.3 to +10.5**. Training and playback now agree; training reads slightly lower because of exploration noise (88–89% reached during training). |
+| 151808 | `-Scripted`, 60 s, CPU | 100.0% reached, avgReturn +10.1 to +10.6: the upper bound is unchanged. |
+
+| Batch | Run 1b, `cccd809` (`Avg Rew Sum` / episode length) | 151806, `07eac52` |
+|---:|---|---|
+| 0 | −2.97 / 357 | −3.04 / 357 |
+| 5 | 13.74 / 196 | 3.01 / 278 |
+| 10 | 14.52 / 95 | 9.64 / 114 |
+| 20 | 14.92 / 73 | 10.05 / 80 |
+| 29 | 15.23 / 71 | 10.13 / 79 |
+
+- **Trainer config:** identical to run 1b's except `IterationNum` (960 = 30 × 32), `Seed` and the paths/timestamps. So the 36 expected values still hold.
+- **Observation, not a finding:** the new run learns more slowly in the first 5 batches (+3.0 against about +8.7 after removing the old offset). By batch 10 both are near +9.6. Possible causes: the old double bonus was a stronger reach signal, plus seed-to-seed variation. One run each can't tell them apart.
+- **Fixed-step check on these logs:** see [Spike C](C-fixed-timestep.md). Every 10 s window is exactly 600 frames in training and playback.
+
 ## Follow-ups
-- STATUS.md: L-004 (run this spike), done. L-005: confirm the C-004 fix on `build-07eac52`.
+- STATUS.md: L-004 (run this spike), done. L-005 (confirm the C-004 fix on `build-07eac52`), done: PASS.
 - Spike C (fixed step): Learning Agents' `BeginTraining` already sets a fixed 60 Hz timestep, uncapped FPS and max physics step = fixed step. Headless `-Infer` sets the same.
