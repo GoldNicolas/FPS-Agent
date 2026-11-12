@@ -177,3 +177,147 @@ struct FReachTaskSettings
 	/** Game-side stats line in the log every N seconds of game time. */
 	UPROPERTY(EditAnywhere, Category="SpikeA") float StatsLogIntervalSeconds = 10.f;
 };
+
+/**
+ * Combat reward weights (spec 2026-11-12-combat-training-design §3). Design values agreed with the user, no external
+ * source: tune by sweeps (-Set=Combat.Reward.<Field>=<value>).
+ */
+USTRUCT(BlueprintType)
+struct FCombatRewardSettings
+{
+	GENERATED_BODY()
+	/** Damage is divided by this: full health + armor (100 + 50), so a kill from full is worth 1.0. */
+	UPROPERTY(EditAnywhere, Category="Reward") float DamageNormalizer = 150.f;
+	/** Multiplies damage dealt / DamageNormalizer (health + armor actually removed). */
+	UPROPERTY(EditAnywhere, Category="Reward") float DamageDealtWeight = 1.f;
+	UPROPERTY(EditAnywhere, Category="Reward") float Kill = 1.f;
+	/** Once per bot per episode, on the first decision it passes the line-of-sight-in-FOV check. */
+	UPROPERTY(EditAnywhere, Category="Reward") float FirstSighting = 0.2f;
+	/** Clear bonus = ClearBase + ClearSpeed * (time left / time limit): once, when every bot is dead and the agent lives. */
+	UPROPERTY(EditAnywhere, Category="Reward") float ClearBase = 0.5f;
+	UPROPERTY(EditAnywhere, Category="Reward") float ClearSpeed = 1.5f;
+	/** The aim-helper potential reaches 0 at this aim error (degrees). Its weight is per stage (FCombatStageSpec). */
+	UPROPERTY(EditAnywhere, Category="Reward") float AimHelperRangeDeg = 30.f;
+	/** Multiplies -(damage taken / DamageNormalizer). */
+	UPROPERTY(EditAnywhere, Category="Reward") float DamageTakenWeight = 1.f;
+	UPROPERTY(EditAnywhere, Category="Reward") float Death = -1.f;
+	/** Per fired bullet that hits no enemy. */
+	UPROPERTY(EditAnywhere, Category="Reward") float MissPerBullet = -0.01f;
+	/** Per second of episode time (anti-camping). */
+	UPROPERTY(EditAnywhere, Category="Reward") float TimePerSecond = -0.01f;
+};
+
+/** Trainer and network settings for combat stages (D-023). The game sends them to the trainer; sweep with -Set=Combat.Ppo.*. */
+USTRUCT(BlueprintType)
+struct FCombatPpoSettings
+{
+	GENERATED_BODY()
+	/** A decision every N fixed 60 Hz ticks: 4 = 15 decisions per second (D-023). */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 TicksPerDecision = 4;
+	/** 0.995 at 15 Hz looks about 13 s ahead (research note §2). Sweep 0.99-0.997. */
+	UPROPERTY(EditAnywhere, Category="PPO") float Discount = 0.995f;
+	UPROPERTY(EditAnywhere, Category="PPO") float GaeLambda = 0.95f;
+	/** Learning Agents default 0; sweep 0 / 0.001 / 0.01 (research note §5). */
+	UPROPERTY(EditAnywhere, Category="PPO") float EntropyWeight = 0.f;
+	UPROPERTY(EditAnywhere, Category="PPO") float LearningRatePolicy = 0.0001f;
+	UPROPERTY(EditAnywhere, Category="PPO") float LearningRateCritic = 0.001f;
+	/** Gradient work per update (Learning Agents defaults). Scale with the number of games via -Set=Combat.Ppo.* (C-007, Spike B). */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 IterationsPerGather = 32;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 PolicyBatchSize = 1024;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 CriticBatchSize = 4096;
+	/** Experience per update: the replay buffer is sent when either limit is reached (Learning Agents defaults; C-007). */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 ReplayMaxSteps = 10000;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 ReplayMaxEpisodes = 1000;
+	/** Policy and critic: HiddenLayers x HiddenSize; policy memory MemorySize. Changing them breaks resume from older snapshots. */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 HiddenLayers = 2;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 HiddenSize = 256;
+	UPROPERTY(EditAnywhere, Category="PPO") int32 MemorySize = 128;
+	/** Trainer snapshot interval in gradient iterations (README -> Snapshot timing). */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 IterationsPerSnapshot = 10;
+	/** Run length when neither -Batches nor -Iterations is given (gradient iterations). */
+	UPROPERTY(EditAnywhere, Category="PPO") int32 MaxIterations = 1000000;
+	UPROPERTY(EditAnywhere, Category="PPO") bool bTrainOnGpu = true;
+	UPROPERTY(EditAnywhere, Category="PPO") bool bUseTensorboard = true;
+	/** Game-side stats line (and -StatsCsv row) every N seconds of game time. */
+	UPROPERTY(EditAnywhere, Category="PPO") float StatsLogIntervalSeconds = 10.f;
+};
+
+/** What the agent perceives and how fast it turns (spec §2). Changing ray or set sizes changes the network layout. */
+USTRUCT(BlueprintType)
+struct FCombatPerceptionSettings
+{
+	GENERATED_BODY()
+	/** Horizontal field of view for the line-of-sight check (README: 103°, verify). */
+	UPROPERTY(EditAnywhere, Category="Perception") float FieldOfViewDeg = 103.f;
+	/** Enemies seen within this many seconds stay in the observation as "remembered" (spec §2). */
+	UPROPERTY(EditAnywhere, Category="Perception") float MemorySeconds = 2.f;
+	UPROPERTY(EditAnywhere, Category="Perception") int32 MaxEnemies = 5;
+	UPROPERTY(EditAnywhere, Category="Perception") int32 MaxSounds = 4;
+	/** Ray ring from eye height: RayYawCount directions x RayPitchesDeg (degrees, + = up). Level geometry only. */
+	UPROPERTY(EditAnywhere, Category="Perception") int32 RayYawCount = 24;
+	UPROPERTY(EditAnywhere, Category="Perception") TArray<float> RayPitchesDeg = { -20.f, 0.f, 15.f };
+	UPROPERTY(EditAnywhere, Category="Perception") float RayRangeCm = 3000.f;
+	/** Observation scales: positions and distances / PositionScaleCm, velocities / VelocityScaleCmPerS, angles / 180°. */
+	UPROPERTY(EditAnywhere, Category="Perception") float PositionScaleCm = 3000.f;
+	UPROPERTY(EditAnywhere, Category="Perception") float VelocityScaleCmPerS = 600.f;
+	/** The hit indicator shows the direction of damage for this long (D-024). */
+	UPROPERTY(EditAnywhere, Category="Perception") float HitIndicatorSeconds = 1.f;
+	/** Aim turn-rate cap (human-likeness, verify): 720°/s = 48° per decision at 15 Hz. */
+	UPROPERTY(EditAnywhere, Category="Perception") float MaxTurnRateDegPerSec = 720.f;
+	UPROPERTY(EditAnywhere, Category="Perception") float MaxPitchDeg = 80.f;
+};
+
+/** One curriculum stage (spec §5): each knob has an easy (difficulty 0) and a hard (difficulty 1) value. Build A: S0. */
+USTRUCT(BlueprintType)
+struct FCombatStageSpec
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, Category="Stage") float TimeLimitSeconds = 20.f;
+	/** Aim-helper potential weight W (spec §3): 0.2 in S0/S1, 0.1 in S2, 0 in S3. */
+	UPROPERTY(EditAnywhere, Category="Stage") float AimHelperWeight = 0.2f;
+	/** S0: false (movement, crouch, walk and jump actions are ignored). */
+	UPROPERTY(EditAnywhere, Category="Stage") bool bAgentCanMove = false;
+	/** Open floor side in 4 m tiles (20 = 80 m), inside a one-tile wall ring. */
+	UPROPERTY(EditAnywhere, Category="Stage") int32 FloorTiles = 20;
+	UPROPERTY(EditAnywhere, Category="Stage") int32 BotsEasy = 1;
+	UPROPERTY(EditAnywhere, Category="Stage") int32 BotsHard = 5;
+	UPROPERTY(EditAnywhere, Category="Stage") float BotDistanceMinCm = 500.f;
+	UPROPERTY(EditAnywhere, Category="Stage") float BotDistanceMaxCmEasy = 1500.f;
+	UPROPERTY(EditAnywhere, Category="Stage") float BotDistanceMaxCmHard = 3500.f;
+	/** Bots stand within ± this many degrees of the agent's facing (180 = all around). */
+	UPROPERTY(EditAnywhere, Category="Stage") float BotSpreadDegEasy = 45.f;
+	UPROPERTY(EditAnywhere, Category="Stage") float BotSpreadDegHard = 180.f;
+	UPROPERTY(EditAnywhere, Category="Stage") float CrouchedFractionEasy = 0.f;
+	UPROPERTY(EditAnywhere, Category="Stage") float CrouchedFractionHard = 0.3f;
+	/** Promotion gate: the -Eval clear rate at difficulty 1 (spec §5). */
+	UPROPERTY(EditAnywhere, Category="Stage") float PromotionClearRate = 0.7f;
+};
+
+/** The automatic difficulty ramp (spec §5) and the stage table. */
+USTRUCT(BlueprintType)
+struct FCurriculumSettings
+{
+	GENERATED_BODY()
+	/** Counted (non-review) episodes per rolling window. */
+	UPROPERTY(EditAnywhere, Category="Curriculum") int32 WindowEpisodes = 20;
+	UPROPERTY(EditAnywhere, Category="Curriculum") float RaiseAboveClearRate = 0.7f;
+	UPROPERTY(EditAnywhere, Category="Curriculum") float LowerBelowClearRate = 0.4f;
+	UPROPERTY(EditAnywhere, Category="Curriculum") float Step = 0.05f;
+	/** Fraction of episodes sampled at a random easier level (anti-forgetting). They are not counted by the ramp. */
+	UPROPERTY(EditAnywhere, Category="Curriculum") float ReviewFraction = 0.2f;
+	/** Knob jitter as a fraction of the easy-hard range. */
+	UPROPERTY(EditAnywhere, Category="Curriculum") float JitterFraction = 0.1f;
+	UPROPERTY(EditAnywhere, Category="Curriculum") FCombatStageSpec S0;
+};
+
+/** Combat stages (S0-S3): rewards, trainer, perception, arena spacing. */
+USTRUCT(BlueprintType)
+struct FCombatSettings
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, Category="Combat") FCombatRewardSettings Reward;
+	UPROPERTY(EditAnywhere, Category="Combat") FCombatPpoSettings Ppo;
+	UPROPERTY(EditAnywhere, Category="Combat") FCombatPerceptionSettings Perception;
+	/** Distance between arena centres: more than the largest arena plus 50 m (spec §5). Arenas never interact anyway. */
+	UPROPERTY(EditAnywhere, Category="Combat") float ArenaSpacingCm = 15000.f;
+};
