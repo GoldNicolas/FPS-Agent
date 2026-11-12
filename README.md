@@ -7,8 +7,12 @@ The agents ("beans with guns") learn by trial and error (PPO) **only against scr
 > **Status (2026-11-11):**
 > - **Plan 1 (core sandbox) is done:** bean characters, Valorant-like movement, a hitscan rifle (damage per hitbox, spread, recoil, cadence, reload), health + armor, and a runtime-built shooting range with bots.
 > - **Plan 2 (maps) is done:** an original blockout map `map01` with elevation, plus a 50-map validated procedural pool, all built at runtime from JSON specs ([plans](docs/superpowers/plans/)).
-> - **Tests:** 27 C++ tests pass headless (`-nullrhi`) and 18 Python tests pass. Both plans were verified in play-in-editor through Unreal-MCP.
-> - **Next:** Phase 0 spikes (Linux build → Cradle).
+> - **Tests:** 31 C++ tests pass headless (`-nullrhi`) and 18 Python tests pass. Both plans were verified in play-in-editor through Unreal-MCP.
+> - **Spike A is built:**
+>   - Linux cross-compile is set up (v26 toolchain + Linux target).
+>   - The Learning Agents trainer Python is pinned in `cluster/learning_agents_python/`.
+>   - A toy reach task (`-Stage=SpikeA`) and `tools/package_linux.ps1` are in place.
+>   - **Next:** the CLUSTER side runs it ([spike report](docs/spikes/A-learning-agents-linux.md)).
 >
 > **The live state of both sides is in [`docs/STATUS.md`](docs/STATUS.md).**
 
@@ -124,7 +128,7 @@ FPS-Agent/
 │   │   ├── Weapons/           # hitscan rifle, combat math, fire-state machine
 │   │   ├── Bots/              # scripted range bots (static/strafe), later more behaviors
 │   │   ├── Arena/             # ArenaGameMode, range + map builders, FMapSpec, HUD
-│   │   ├── Learning/          # (next) Learning Agents manager/interactor/environment
+│   │   ├── Learning/          # Learning Agents layer: Spike A reach task (interactor, env, task actor)
 │   │   ├── Eval/              # (later) deathmatch game mode, metrics logging
 │   │   └── Tests/             # automation tests (run headless)
 │   ├── Config/                # DefaultEngine.ini, DefaultGame.ini (tuning), DefaultInput.ini
@@ -133,7 +137,8 @@ FPS-Agent/
 ├── tools/
 │   ├── build.ps1 / run_tests.ps1  # build editor target; run tests headless
 │   ├── mapgen/                # map format, validator, generator, previews (+ maps/map01.py)
-│   └── package_linux.ps1      # (next) RunUAT BuildCookRun wrapper for Linux
+│   ├── package_linux.ps1      # Linux BuildCookRun -> tarball + SHA256SUMS (+ -Publish: GitHub prerelease)
+│   └── package/make_tarball.py  # tar.gz with Unix exec bits (Windows has none)
 ├── cluster/
 │   ├── env/                   # Miniforge env setup for the trainer
 │   ├── learning_agents_python/  # Learning Agents + NNE Python copied from the engine, version-pinned
@@ -500,15 +505,20 @@ The policy and critic networks are small multilayer perceptrons, so the GPU most
 
 ### Build and ship (Windows)
 1. Install the **v26 cross-compile toolchain** ([download](https://cdn.unrealengine.com/CrossToolchain_Linux/v26_clang-20.1.8-rockylinux8.exe)) and check that `LINUX_MULTIARCH_ROOT` is set. Make sure the Linux target platform is installed in the Epic Launcher options.
-2. Package:
+2. Package from a clean, pushed commit, with the editor closed:
    ```powershell
-   & "<UE_5.7>\Engine\Build\BatchFiles\RunUAT.bat" BuildCookRun `
-     -project="<repo>\Game\FPSAgent\FPSAgent.uproject" -platform=Linux `
-     -clientconfig=Development -build -cook -stage -pak -archive `
-     -archivedirectory="<repo>\Builds\Linux" -noP4 -utf8output
+   powershell -File tools/package_linux.ps1            # Builds/build-<sha>/FPSAgent-Linux-<sha>.tar.gz + SHA256SUMS
+   powershell -File tools/package_linux.ps1 -Publish   # ...and GitHub prerelease build-<sha>
    ```
-   Development config, with the Learning Agents training modules included.
-3. Make a tarball plus `SHA256SUMS` and publish it as GitHub Release `build-<short-sha>`. Log it in [`docs/builds.md`](docs/builds.md) and add a request in `STATUS.md`. The CLUSTER side downloads it with `gh release download` into `~/fps-agent/builds/<sha>/` and checks the checksum.
+   The script:
+   - refuses a dirty tree;
+   - runs `RunUAT BuildCookRun -platform=Linux -clientconfig=Development -build -cook -stage -pak -archive`;
+   - writes `BUILD_INFO.txt` (commit, engine, toolchain) into the build;
+   - tars it with Unix exec bits (`tools/package/make_tarball.py`);
+   - writes `SHA256SUMS`.
+
+   The build is Development config, with the Learning Agents training modules included. `/Engine/BasicShapes` is always cooked (`DefaultGame.ini`), because the arena code loads those meshes by path.
+3. Log the build in [`docs/builds.md`](docs/builds.md) and add a request in `STATUS.md`. The CLUSTER side downloads it with `gh release download` into `~/fps-agent/builds/<sha>/` and checks the checksum.
 
 ### How a training job works
 These are the official Learning Agents scale-out flags from Epic's *Scaling Out with Learning Agents* doc. The job script is an **untested sketch** until Spikes A–D pass.
@@ -532,9 +542,11 @@ NUM_GAMES=${NUM_GAMES:-16}                  # ~3 cores per game process (tune in
 ARENAS=${ARENAS:-16}                        # arenas (= agents) per process (tune in Spike B)
 
 source ~/miniforge3/bin/activate la-train
-python3 cluster/learning_agents_python/train.py FPSAgent -l \
+python3 -u cluster/learning_agents_python/train.py FPSAgent -l \
   --nne-cpu-path cluster/learning_agents_python/nne_runtime_basic_cpu \
-  Socket 127.0.0.1:$PORT "$RUN/trainer" &
+  Socket 127.0.0.1:$PORT "$RUN/trainer" > "$RUN/trainer.log" 2>&1 &
+# Wait for the listener. Never probe the port: a connect+close wedges the trainer.
+until grep -q "Server listening on" "$RUN/trainer.log"; do sleep 1; done
 
 for i in $(seq 0 $((NUM_GAMES-1))); do
   "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended \
@@ -547,6 +559,37 @@ done
 wait
 ```
 `-Stage`, `-Seed` and `-Arenas` are our own command-line arguments, parsed in C++.
+
+**Start order (important):**
+1. Start the trainer first. Launch the games only once its log shows `Server listening on <host>:<port>` (needs `-l`).
+2. **Never probe the trainer port** (`nc -z`, bash `/dev/tcp`, ...). Its listener blocks forever on a connection that closes before sending a config, so one probe wedges the whole trainer.
+3. A game that can't reach the trainer exits with code 1 after `-LearningAgentsTimeout` + 15 s.
+
+#### Game command-line arguments
+Ours are parsed in `Common/FPSRunArgs` and logged at startup (`ArenaGameMode: ... Stage=... Seed=...`).
+
+| Argument | Meaning |
+|---|---|
+| `-Stage=S0..S3` | Curriculum stage (later). Default `S0`. |
+| `-Stage=SpikeA` | Toy reach task: `-Arenas` walled floors, one bean agent each, walking to random targets. Trains against the external trainer unless `-Infer` is given. |
+| `-Seed=N` | Base seed. Every episode RNG = hash(seed, arena index, episode count). |
+| `-Arenas=K` | Arenas (= agents) in this process. Default 1. |
+| `-Map=range\|map01\|gen_007\|pool` | Play arena when not in a training stage. |
+| `-Infer` | Play the policy back, no trainer (mean actions). Headless it uses the same fixed 60 Hz step as training. |
+| `-Scripted` | (implies `-Infer`) Agents walk straight to the target: the task's upper bound and an environment check. |
+| `-ResumeFrom=<dir>` | Load `encoder/policy/decoder.bin` (+ `critic.bin` when training) from `<dir>` before starting. A missing file exits with code 2. |
+| `-Iterations=N` | Trainer stops after N iterations; the games then exit with code 0. Default: `SpikeA.MaxIterations` in settings. |
+
+Engine flags we rely on: `-nullrhi -nosound -unattended`, `-LearningAgentsUseExternalTrainingProcess` (implied: the game never spawns a trainer itself), `-LearningAgentsIpAddress=` / `-LearningAgentsHostname=`, `-LearningAgentsPort=`, `-LearningAgentsTimeout=`, `-abslog=`.
+
+**Game exit codes (training stages):** `0` = the trainer finished · `1` = trainer unreachable, timed out or crashed · `2` = bad `-ResumeFrom`.
+
+**Game log lines to grep:**
+- `SpikeA: ready. ...`: settings in effect.
+- `SpikeA stats: gameTime=... episodes=... reached=...% avgReturn=... agentSteps/s(wall)=...`: every 10 s of game time.
+- `SpikeA: exiting (code N): ...`
+
+**Resume semantics:** weights only. The game loads the snapshots before connecting; the trainer starts from those weights with a fresh optimizer and iteration counter.
 
 **Kinds of parallelism:**
 1. **Within a job:** N game processes × K arenas = N·K agents feeding one PPO trainer. This makes each run faster in wall-clock time. Epic tested 512 game processes against one trainer.

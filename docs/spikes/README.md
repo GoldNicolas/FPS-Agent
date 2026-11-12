@@ -4,7 +4,7 @@ One file per spike, named `<letter>-<short-name>.md` (e.g. `A-headless-external-
 
 | Spike | Question | Owner | Report |
 |---|---|---|---|
-| A | Packaged 5.7 Learning Agents game trains on Cradle with `-nullrhi` against an external `train.py`; snapshots save and resume works | LOCAL build → CLUSTER run | |
+| A | Packaged 5.7 Learning Agents game trains on Cradle with `-nullrhi` against an external `train.py`; snapshots save and resume works | LOCAL build → CLUSTER run | [A-learning-agents-linux.md](A-learning-agents-linux.md) (build done; cluster run pending) |
 | B | Steps per second against N processes × K arenas on one node; pick defaults | CLUSTER | |
 | C | Fixed 60 Hz step and uncapped tick behave correctly headless | CLUSTER (LOCAL adds the C++ hooks) | |
 | D | Game processes on other nodes connect to the trainer | CLUSTER | |

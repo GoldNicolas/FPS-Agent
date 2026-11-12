@@ -13,6 +13,8 @@
   tar xzf FPSAgent-Linux-<sha>.tar.gz
   ```
 
+- **Make (LOCAL):** `powershell -File tools/package_linux.ps1 [-Publish]` (clean, pushed tree; editor closed). Each build contains `Linux/BUILD_INFO.txt` with the commit, engine and toolchain.
+
 | Tag | Source commit | UE | Config | Size | What changed / what to test | Status |
 |---|---|---|---|---|---|---|
-| | | | | | | |
+| `build-cccd809` | `cccd809` | 5.7.4 · v26 toolchain | Development | 380 MB (`sha256 422c84df…`) | **First Linux build. Spike A:** `-Stage=SpikeA` toy reach task, Learning Agents with an external trainer only, `-Infer` / `-Scripted` / `-ResumeFrom` / `-Iterations`. Also contains the range, `map01` and the 50-map pool (`-Map=`). **Test:** run Spike A per [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md) (L-004). **Checked locally:** the package has exec bits, cooked BasicShapes, the 52 MapSpecs files and both plugins, and no UnrealMCP. It has **never run on Linux** (no Linux box here). | published, untested on Linux |

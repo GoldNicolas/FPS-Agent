@@ -10,11 +10,15 @@ _Last updated: 2026-11-11 by LOCAL_
   - Maps: original `map01` with elevation, plus a 50-map validated pool, all built at runtime from JSON. Choose with `-Map=range|map01|gen_007|pool`.
   - Tests: 27 C++ (headless) + 18 Python; verified in PIE via MCP.
   - Linux cross-compile ready: v26 toolchain + Linux target platform installed, Turnkey `VerifySdk` → Valid.
-  - Next: copy the Learning Agents Python trainer, then the Spike A toy build (first `build-<sha>` release).
-- **CLUSTER:** Recon (L-001) and Spike E (L-003). Nothing to run from LOCAL yet: no Linux build has been published.
+  - Spike A built and published as **`build-cccd809`**:
+    - toy reach task (`-Stage=SpikeA`);
+    - trainer Python pinned in `cluster/learning_agents_python/`;
+    - 31 C++ tests pass.
+  - Next: the real S0 Learning Agents environment (ray-cast/line-of-sight observations, aim/move/shoot, rewards vs scripted bots).
+- **CLUSTER:** L-001 recon → L-003 env (add `smart_open`) → **L-004 Spike A run**.
 
 ## Latest build
-None yet. Builds are listed in [`builds.md`](builds.md) and published as GitHub Releases tagged `build-<sha>`.
+**`build-cccd809`** (2026-11-11): first Linux build, Spike A. Details and what to test: [`builds.md`](builds.md). Procedure: [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md).
 
 ## Requests: LOCAL → CLUSTER
 | ID | Date | Request | Status | Answer / link |
@@ -22,6 +26,7 @@ None yet. Builds are listed in [`builds.md`](builds.md) and published as GitHub 
 | L-001 | 2026-11-11 | Recon: run the commands in [`cradle.md`](cradle.md), fill in every `TBD`, and list which questions for the admins are still open | open | |
 | L-002 | 2026-11-11 | Bootstrap tools: Miniforge in `$HOME` (conda-forge only), install `gh`, run `gh auth login`, clone this repo to `~/fps-agent/repo`. Confirm that `gh release list` works | done | Not needed: the cluster already has GitHub access (user, 2026-11-11). Still confirm `gh release list` works before the first build lands. |
 | L-003 | 2026-11-11 | Spike E: write `cluster/env/la-train.yml` (Python 3.11, numpy, PyTorch CUDA build matching the driver, tensorboard), create the env, and check `torch.cuda.is_available()` in a GPU job. Report in `spikes/E-python-gpu.md` | open (after L-001) | |
+| L-004 | 2026-11-11 | **Spike A run** with `build-cccd809`, following [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md) → *Suggested CLUSTER procedure*: (1) a smoke test; (2) a ~150-iteration toy training run (2 games × 16 arenas); (3) a resume test with `-ResumeFrom`; (4) `-Infer` playback of the snapshots. **The `la-train` env also needs `smart_open`**: the trainer imports it at load (the engine pins 7.3.0). **Start the trainer first and never probe its port** (see the spike doc). Fill in *Cluster result* in the spike doc. If it fails, add a `C-xxx` request with the game/trainer log excerpt. | open (after L-001, L-003) | |
 
 ## Requests: CLUSTER → LOCAL
 | ID | Date | Request | Status | Answer / link |
