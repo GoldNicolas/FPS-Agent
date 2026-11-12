@@ -310,7 +310,7 @@ This is also better for RL. Randomized original layouts keep the agent from memo
 |---|---|
 | Self | Velocity (local frame), grounded, crouched, health, armor, ammo fraction, reloading, current spread, recoil state / time since last shot, aim pitch |
 | Geometry | Fan of about 72 ray casts from eye height (e.g. 24 yaw × 3 pitch), normalized distance and hit type |
-| Enemies (set, up to 5) | Only enemies that pass a **line-of-sight check** (traces to head and chest, inside the 103° FOV), or were seen in the last ~2 s (flagged as "remembered"). For each: relative position in the local frame, distance, **aim error to the head** (yaw and pitch), relative velocity, whether it is facing the agent |
+| Enemies (set, up to 5) | Only enemies that pass a **line-of-sight check** (traces to head and chest, inside the 103° × 70.5° view cone), or were seen in the last ~2 s (flagged as "remembered"). For each (15 values): relative position in the local frame, distance, **aim error to the head** (yaw and pitch: coarse /180° plus a fine channel /5° clamped to ±1, D-028), relative velocity, whether it is facing the agent, crouched, visible or remembered, age |
 | Hit indicator, hearing (D-024) | Direction of damage taken. Enemy gunshots and footsteps within a radius: direction, rough distance, age (the same rules the bots use). Full layout: `docs/superpowers/specs/2026-11-12-combat-training-design.md` §2 |
 
 ### Actions
@@ -555,11 +555,11 @@ for i in $(seq 0 $((NUM_GAMES-1))); do
     -LearningAgentsIpAddress=127.0.0.1 -LearningAgentsPort=$PORT \
     -LearningAgentsTimeout=120 \
     -Stage=S0 -Seed=$((SLURM_JOB_ID*1000+i)) -Arenas=$ARENAS \
-    -abslog="$RUN/game_$i.log" &
+    -StatsCsv="$RUN/stats_$i.csv" -abslog="$RUN/game_$i.log" &
 done
 wait
 ```
-`-Stage`, `-Seed` and `-Arenas` are our own command-line arguments, parsed in C++. The connect timeout is generous because engine startup is slow on glibc 2.28 (Spike A finding 7). `-Stage=S0` doesn't exist yet; today only `-Stage=SpikeA` trains.
+`-Stage`, `-Seed` and `-Arenas` are our own command-line arguments, parsed in C++. The connect timeout is generous because engine startup is slow on glibc 2.28 (Spike A finding 7).
 
 **Start order (important):**
 1. Start the trainer first. Launch the games only once its log shows `Server listening on <host>:<port>` (needs `-l`).
@@ -571,25 +571,35 @@ Ours are parsed in `Common/FPSRunArgs` and logged at startup (`ArenaGameMode: ..
 
 | Argument | Meaning |
 |---|---|
-| `-Stage=S0..S3` | Curriculum stage (later). Default `S0`. |
+| `-Stage=S0` | **Combat stage S0 (aim gallery)**: `-Arenas` generated 80 m floors, one agent plus 1-5 static bots each, 15 decisions per second (D-023), automatic difficulty ramp per arena. Trains against the external trainer unless `-Infer` / `-Eval` / `-Scripted`. S1-S3 come in later builds (asking for them exits with code 2). No `-Stage` = the play arena (range or map). |
+| `-StartDifficulty=X` | Initial ramp level of every arena, 0-1 (default 0). Chained jobs pass the last logged mean `level=`. |
+| `-Eval` | Promotion test (implies `-Infer`): `-EvalEpisodes=N` (default 200) fixed-seed episodes at `-StartDifficulty`, mean actions, no ramp, no review episodes. Each arena plays a fixed share of the N episodes (N/K, plus one for the first N mod K), so slow episodes are never dropped. The episode seeds depend on `-Seed` **and** `-Arenas`, so compare snapshots with the same pair. Writes `-EvalJson=<path>`, logs `CombatEval: {...}`, exits 0. Needs `-ResumeFrom` unless `-Scripted`. Resume only snapshots made by the same build and network settings: a mismatched snapshot loads without an error and then scores 0. |
+| `-StatsCsv=<path>` | One CSV row per stats window: clear/death/timeout rates, average return, every reward term, accuracy, headshot rate, clear time, ramp level (mean/min/max), decisions/s. Appends; the header is written only when the file is new or empty. `gameTime` restarts at 0 in each chained job. |
+| `-Set=Path=Value;...` | Override any setting at startup, e.g. `-Set="Combat.Reward.Kill=1.5;Combat.Ppo.Discount=0.997"` (D-025). Logged as `Settings overrides (-Set): ...`. An unknown path or bad value exits with code 2. Changing ray counts or network sizes changes the network, so older snapshots can't be resumed. `Body.*` values are read by the bean constructor before `-Set` applies, so they only partly take effect: change them in config instead. |
+| `-Stage=SpikeC` | Headless mechanics probe (C-006): one bean runs, walks and crouches (speed over the last second of each 3 s phase), then holds the trigger (rounds/s over 20 shots) and taps 8 times. Logs `SpikeC probe: run=... (cfg ...) ... verdict=PASS\|MISMATCH` and exits 0. |
 | `-Stage=SpikeA` | Toy reach task: `-Arenas` walled floors, one bean agent each, walking to random targets. Trains against the external trainer unless `-Infer` is given. |
 | `-Seed=N` | Base seed. Every episode RNG = hash(seed, arena index, episode count). |
 | `-Arenas=K` | Arenas (= agents) in this process. Default 1. |
 | `-Map=range\|map01\|gen_007\|pool` | Play arena when not in a training stage. |
 | `-Infer` | Play the policy back, no trainer (mean actions). Headless it uses the same fixed 60 Hz step as training. |
-| `-Scripted` | (implies `-Infer`) Agents walk straight to the target: the task's upper bound and an environment check. |
+| `-Scripted` | (implies `-Infer`) A reference agent instead of the policy. SpikeA: walks straight to the target. S0: turns to the nearest visible enemy at the turn-rate cap and fires when on the head. Same senses as the policy. |
 | `-ResumeFrom=<dir>` | Load `encoder/policy/decoder.bin` (+ `critic.bin` when training) from `<dir>` before starting. A missing file exits with code 2. |
 | `-Batches=N` | **Preferred run length.** The trainer stops after N experience batches; the games then exit with code 0. One batch = one round of experience from the games, then `IterationsPerGather` (32) gradient iterations, so this sets `IterationNum = N × 32`. Wins over `-Iterations`. |
 | `-Iterations=N` | The same, counted in **gradient iterations** (32 per batch, C-005): `-Iterations=150` is under 5 batches. Default when neither is given: `SpikeA.MaxIterations` in settings. |
 
 Engine flags we rely on: `-nullrhi -nosound -unattended`, `-LearningAgentsUseExternalTrainingProcess` (implied: the game never spawns a trainer itself), `-LearningAgentsIpAddress=` / `-LearningAgentsHostname=`, `-LearningAgentsPort=`, `-LearningAgentsTimeout=`, `-abslog=`.
 
-**Game exit codes (training stages):** `0` = the trainer finished · `1` = trainer unreachable, timed out or crashed · `2` = bad `-ResumeFrom`.
+**Game exit codes (training stages):** `0` = the trainer finished or `-Eval` completed · `1` = trainer unreachable, timed out or crashed · `2` = bad arguments (`-ResumeFrom` files, `-Set`, a stage not in this build, `-Eval` without snapshots). The Linux build returns these codes. On Windows, an early non-forced exit can return 0 even though the log says `exiting (code 2)`, so local checks read the log line.
 
 **Game log lines to grep:**
 - `SpikeA: ready. ...`: settings in effect.
 - `SpikeA stats: gameTime=... episodes=... reached=...% avgReturn=... agentSteps/s(wall)=...`: every 10 s of game time.
 - `SpikeA: exiting (code N): ...`
+- `Combat: ready. ...` and `Combat: ppo ...`: S0 settings in effect. `Combat: trainer settings: ...`: what the trainer was sent.
+- `CombatStats: gameTime=... episodes=... clear=..% died=..% timeout=..% avgReturn=... kills/ep=... acc=..% hs=..% clearTime=..s level=mean(min..max) decisions/s(wall)=... terms: DamageDealt=... Kill=... FirstSighting=... Clear=... AimHelper=... DamageTaken=... Death=... Miss=... Time=...`: every 10 s of game time.
+- `CombatEval: {json}`: the `-Eval` result (the same JSON as `-EvalJson`).
+- `Combat: exiting (code N): ...`
+- `SpikeC probe: ...` and `SpikeC: exiting (code 0): probe finished: PASS|MISMATCH`.
 
 **Resume semantics:** weights only. The game loads the snapshots before connecting; the trainer starts from those weights with a fresh optimizer and iteration counter.
 

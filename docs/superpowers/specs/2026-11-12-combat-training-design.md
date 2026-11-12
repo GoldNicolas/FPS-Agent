@@ -3,6 +3,8 @@
 - **Status: APPROVED by the user (2026-11-12).** All six sections were agreed one by one, then the whole document was reviewed.
   - Next: the build A (S0) implementation plan in `docs/superpowers/plans/`, then the code (tests first).
   - Changes from now on are recorded in this file and in `docs/decisions.md`.
+  - Build A (S0) implemented 2026-11-12 (plan `docs/superpowers/plans/2026-11-12-combat-build-a-s0.md`); shipped as the build in `docs/builds.md`.
+  - Build A clarification on `-Eval`: each arena plays a fixed share of the episodes (N/K, plus one for the first N mod K), so the clear rate is not biased toward quick clears.
 - **Side:** LOCAL (game). CLUSTER runs the training.
 - **Research behind it:** [`docs/research/rl-reward-and-optimization.md`](../../research/rl-reward-and-optimization.md).
 - **Builds on:** README → *RL design* (observations, actions, reward table, curriculum) and → *Scripted bots*. Spike A ([`docs/spikes/A-learning-agents-linux.md`](../../spikes/A-learning-agents-linux.md)) proved the pipeline. D-022 sets the episode-end rule.
@@ -85,7 +87,7 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 |---|---|---|
 | Self (about 16 numbers) | Velocity (view frame) · on ground, crouched, walking · health and armor (fractions) · ammo in magazine (fraction), reloading · current spread, shots in the current spray, time since last shot · aim pitch · **time left in the episode** (fraction) | struct of float / bool / velocity |
 | Surroundings | **72 rays** from eye height: 24 directions × 3 pitches (down, level, up), range 30 m (settings). **They trace level geometry only and ignore all pawns**, so they never reveal an enemy. | lidar / static array |
-| Enemies (set, up to 5) | Only enemies that pass a **line-of-sight trace to the head or chest AND are inside the 103° view cone**, or that were seen in the last **2 s** (shown as remembered, at the last-known position). Per enemy: position and distance · **aim error to the head** (yaw, pitch) · velocity · facing the agent · crouched · visible now or remembered, plus the age. | set observation (attention; order and count don't matter) |
+| Enemies (set, up to 5) | Only enemies that pass a **line-of-sight trace to the head or chest AND are inside the 103° × 70.5° view cone**, or that were seen in the last **2 s** (shown as remembered, at the last-known position). Per enemy (15 values): position and distance · **aim error to the head** (yaw, pitch; coarse /180° plus a fine channel /5° clamped to ±1, so sub-degree errors are visible, build A) · velocity · facing the agent · crouched · visible now or remembered, plus the age. | set observation (attention; order and count don't matter) |
 | Hit indicator (D-024) | When damaged: the direction the damage came from (view frame), plus its age. Empty otherwise. | optional |
 | Hearing (set, up to 4; D-024) | Recent gunshots and footsteps by enemies within a hearing radius, using the same rules and radii as the bots: direction (view frame), rough distance, age. | set observation |
 
@@ -98,7 +100,7 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 | Fire | bool | The trigger is held for the 4 ticks; the rifle's own cadence decides the shots. |
 | Reload, crouch, walk, jump | bool each | Crouch, walk and jump are ignored in S0. |
 
-**Human-likeness settings** (README → *Human-likeness*): reaction delay (observations delayed by N ms) and aim noise exist from the start, but they're **off in training**. They're raised later for in-game difficulty levels.
+**Human-likeness settings** (README → *Human-likeness*): reaction delay (observations delayed by N ms) and aim noise exist from the start, but they're **off in training**. They're raised later for in-game difficulty levels. Build A clarification: implemented in a later build. They don't change the observation or action layout, so S0 snapshots stay valid.
 
 ## 3. Reward (agreed 2026-11-12)
 - All weights live in one `FCombatRewardSettings` (settings, hard rule 7). The aim-helper weight is per stage (§5).
@@ -119,7 +121,7 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 - **Episode endings:**
   - death → Termination;
   - all bots dead → Termination;
-  - time limit → **Truncation**: the trainer bootstraps the value, so a timeout isn't treated as a failure (research §1).
+  - time limit → **Termination** (changed from Truncation in build A, D-028). The agent observes the time left and the clear bonus depends on it, so the time limit is part of the task. A timeout ends the reward stream, which is the true value, not a failure penalty. Truncation would bootstrap from a time-left = 0 state the critic never trains on, and with Φ = 0 at the end it would leave an uncancelled −Φ (Pardo et al. 2018, *Time Limits in Reinforcement Learning*).
 - **Completion rule (D-022):** completion is computed from state (agent dead / bots alive / time used), never from flags set while computing rewards. All one-off terms are paid once.
 - **Scale check:** a perfect 3-bot episode is about +8; an early death about −2, inside the trainer's comfortable 1–10 range.
   - The 5.7 trainer clips negative advantages to 0 (research §1), so every good behaviour has a positive term and the penalties stay small.
@@ -215,7 +217,7 @@ The same layout is used in every stage. Everything is in the agent's view frame 
   - The agent spawns facing a random direction.
   - S1 and later: on a tile that no bot can see at spawn time (tile-grid line-of-sight check).
   - S0: the agent stands at the arena centre with the bots placed around it.
-- **Endings:** death or all bots dead → Termination; time limit → Truncation (§3).
+- **Endings:** death, all bots dead and the time limit → Termination (§3, D-028).
   - `MaxEpisodeStepNum` = time limit × 15.
 - **Independence:** each arena resets on its own.
 - **S3 maps:** each arena gets one pool map for the life of the game process (picked by seed and arena index). Arenas and processes differ, and chained jobs re-seed. That avoids rebuilding geometry every episode.
