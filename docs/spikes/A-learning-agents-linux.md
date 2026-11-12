@@ -1,6 +1,6 @@
 # Spike A: packaged Learning Agents game trains on Cradle against an external trainer
 - Date / side: 2026-11-11, LOCAL (build). The CLUSTER side runs it and fills in **Cluster result** below.
-- Build: **`build-cccd809`** (so `<sha>` below = `cccd809`) · Slurm job(s): _CLUSTER fills in_
+- Build: **`build-cccd809`** (so `<sha>` below = `cccd809`) · Slurm job(s): 151703 (smoke), 151704 (run 1), 151705 (run 1b), 151707 (resume), 151708–151710 (playback), all on `gpu001` (`gpuq`)
 - Question: does a packaged UE 5.7 Linux build run headless on Cradle (`-nullrhi`), connect to an external `train.py`, learn a toy task, save snapshots and resume from them?
 - Pass criterion (README → Roadmap): reward goes up on a toy task; snapshots save; training resumes from them.
 
@@ -162,7 +162,60 @@ EOF
 Record mismatches in *Cluster result*. A different value in either table means the game build or the trainer copy isn't what we think it is.
 
 ## Cluster result
-_CLUSTER fills in: PASS / FAIL / PARTIAL with trimmed real output, numbers, and problems._
+**PASS on all four criteria** (2026-11-11, CLUSTER). One bookkeeping bug found: training-time returns are about 5 too high (finding 2, C-004).
+
+- Script: [`cluster/slurm/spikeA.sbatch`](../../cluster/slurm/spikeA.sbatch). The trainer ran on the GPU with the `la-train` env ([Spike E](E-python-gpu.md)).
+- Run folders: `~/beanRant/runs/spikeA-20261111-<jobid>/` on Cradle (D-021).
+
+| Step | Job | Setup | Result |
+|---|---|---|---|
+| Smoke | 151703 | 2 games × 16 arenas, `-Iterations=10` (1 batch) | Connected, stepped, logged, saved the 4 snapshots. All exits 0. 13 s. |
+| Run 1 (as specified) | 151704 | `-Iterations=150` = **5 batches** (finding 1) | `Avg Rew Sum` −3.21 → **+6.94**. Exits 0. 29 s. |
+| Run 1b (extended) | 151705 | `-Iterations=4800` = 150 batches | `Avg Rew Sum` −2.97 → **+14.87**; plateau about +15 after about 15 batches. Episode length 357 → 65 steps. Exits 0. 617 s. |
+| Resume | 151707 | `-ResumeFrom=<run 1b>/snapshots_final`, `-Iterations=30` | First `Iter` line already **+15.30** (a fresh run starts near −3). 100% reached in the first window. Exits 0. |
+| Playback: trained | 151708 | `-Infer`, run 1b snapshots, 120 s, no GPU | 29,899 episodes, **100.0% reached**, avgReturn **+10.25** |
+| Playback: scripted | 151709 | `-Scripted` | 45,558 episodes, 100.0% reached, avgReturn +10.25 |
+| Playback: untrained | 151710 | `-Infer`, no snapshots | 5,744 episodes, 0.0% reached, avgReturn −3.12 |
+
+**Pass criteria:**
+- (a) **PASS.** The reward rises from about −3 to +6.9 (run 1) and +14.9 (run 1b). The training-time numbers are inflated by about 5 (finding 2). Playback shows the true level, +10.25, which equals the scripted upper bound.
+- (b) **PASS.** All four `.bin` files exist: policy 468,528 B, critic 103,192 B, encoder 420 B, decoder 168 B.
+- (c) **PASS.** The resumed run starts at the trained level (+15.30 in training terms).
+- (d) **PASS.** Playback with the snapshots reaches 100% of targets; untrained reaches 0%.
+
+Trimmed real output (run 1b, `trainer.log` and `game_0.log`):
+```
+Iter:       0 | Avg Rew: -0.00835 | Avg Rew Sum: -2.97073 | Avg Return: -0.64445 | Avg Episode Len: 357.14286 | Batch Size: 1
+Iter:     480 | Avg Rew:  0.20494 | Avg Rew Sum: 14.62287 | Avg Return:  8.11088 | Avg Episode Len:  77.51938 | Batch Size: 1
+Iter:    4768 | Avg Rew:  0.25414 | Avg Rew Sum: 14.86879 | Avg Return:  9.62225 | Avg Episode Len:  65.35948 | Batch Size: 1
+SpikeA: trainer settings: iterations=4800 snapshotEvery=10 device=GPU tensorboard=1 seed=151705000
+SpikeA stats: gameTime=1680s mode=train episodes=148 total=22776 reached=89.9% avgReturn=13.877 agentSteps/s(wall)=2437
+SpikeA: exiting (code 0): trainer finished
+```
+
+**Expected trainer config: no mismatches.** The saved `Configs/*.json` of the smoke run, run 1 and run 1b match all 36 values in the two tables above, with a relative tolerance of 1e-6. The resume run also matches, including `IterationNum` 30. `Seed` comes from whichever game connects first: game 1 in the smoke run (`151703001`), game 0 in the others. Every game logged `maxEpisodeSteps=360` and the expected `trainer settings` line.
+
+**Numbers:**
+
+| What | Value |
+|---|---|
+| Seconds per batch (32 iterations) | about 4.1 s: training a median of 2.3 s (3.0 s for the first batch, with critic warm-up) plus waiting for experience 2.0 s |
+| Agent-steps/s while training | about 2,400 overall (games and trainer take turns, so the games sit idle while the trainer updates) |
+| Agent-steps/s in playback (1 process, 16 arenas, 4 cores) | about 17,800 policy, about 26,900 scripted |
+| CPU vs GPU | `Device=GPU` and used, but `nvidia-smi` shows a median of 18.5% and a peak of 32% utilization, 735 MiB. The networks are tiny. |
+| Startup | Trainer listening 2–4 s after start; games connected 3–4 s after launch. The glibc 2.28 slowdown is negligible. |
+| Disk | Build 1.1 GB unpacked; each training run 1.4–8 MB |
+
+**Findings:**
+1. **`IterationNum` counts gradient iterations, not experience batches.** `train_ppo.py` adds 1 to its counter per gradient step, and there are 32 steps per batch (`IterationsPerGather`). So `-Iterations=150` means 5 batches, and the `Iter` lines go 0, 32, 64… The snapshot check also runs per gradient step, so the 4 files are rewritten 3–4 times per batch. This is harmless. (C-005)
+2. **Training-time returns are about 5 too high.** That's one `ReachBonus`. The same weights score +10.25 per episode in playback, exactly the scripted upper bound. During training, the game's own `avgReturn` (about 14–15.5, from `A.Return`) and the trainer's `Avg Rew Sum` (about 15) agree with each other but sit about 5 above it. Geometry also caps a 3–12 m target with a 1 m radius at about +11 on average. So in training mode the reach bonus seems to be paid or counted twice per episode. Learning still works, but the training curves overstate the return. (C-004)
+3. **2 games with `--batch-size 1`:** every update uses one game's buffer (`Batch Size: 1`). The other game's buffer is often thrown away as stale (`discard_stale_experiences`). This is for Spike B: try `--batch-size` = the number of games.
+4. **What the engine writes:**
+   - In its `HOME` (redirected to the run folder): only `.config/Epic/NotAllowedUnattendedBugReports`.
+   - Inside the build folder: `Saved/` and `Intermediate/`.
+   - Nothing lands in the real `~/.config`.
+   - A harmless warning: `sh: xdg-user-dir: command not found`.
+5. **A CLUSTER script issue, already noted:** in playback mode the script's summary lines after `timeout` didn't print. The job ends together with the game. The numbers above come from each run's `eval.log`. This will be fixed in the script before Spike B.
 
 ## Follow-ups
 - STATUS.md: L-004 (run this spike).
