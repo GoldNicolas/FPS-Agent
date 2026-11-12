@@ -491,7 +491,7 @@ Note: Epic warns that glibc older than 2.35 makes the engine **start more slowly
 ### Trainer environment (one time)
 1. Use the existing `~/miniconda3`; no Miniforge is needed. Keep the package cache in `beanRant/` while creating the env: `export CONDA_PKGS_DIRS=~/beanRant/envs/.pkgs`.
 2. Create the environment as a prefix env, conda-forge only: `conda env create -p ~/beanRant/envs/la-train -f cluster/env/la-train.yml`. The yml pins Python 3.11, numpy, a PyTorch build that matches the driver's CUDA version (from `nvidia-smi`), `smart_open==7.3.0`, `tensorboard` and `gh`.
-3. Activate it with `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train`.
+3. In scripts, call `~/beanRant/envs/la-train/bin/python` by full path and unset `PYTHONPATH`, `PYTHONHOME` and `VIRTUAL_ENV`. On this account `activate` alone still runs another env's python (`docs/cradle.md` → *Our paths*).
 4. (Done by LOCAL; see `cluster/learning_agents_python/README.md`.) Copy the trainer's Python files **from your UE 5.7 install** into `cluster/learning_agents_python/`, pinned to that engine version:
    - `Engine/Plugins/Experimental/LearningAgents/Content/Python/`
    - `Engine/Plugins/Experimental/NNERuntimeBasicCpu/Content/Python/`
@@ -540,8 +540,9 @@ PORT=$((40000 + SLURM_JOB_ID % 20000))     # unique per job: no collisions
 NUM_GAMES=${NUM_GAMES:-16}                  # ~3 cores per game process (tune in Spike B)
 ARENAS=${ARENAS:-16}                        # arenas (= agents) per process (tune in Spike B)
 
-source ~/miniconda3/bin/activate ~/beanRant/envs/la-train
-python3 -u $REPO/cluster/learning_agents_python/train.py FPSAgent -l \
+unset PYTHONPATH PYTHONHOME VIRTUAL_ENV            # inherited from the login shell (docs/cradle.md)
+PY=~/beanRant/envs/la-train/bin/python             # full path: `activate` isn't enough on this account
+"$PY" -s -u $REPO/cluster/learning_agents_python/train.py FPSAgent -l \
   --nne-cpu-path $REPO/cluster/learning_agents_python/nne_runtime_basic_cpu \
   Socket 127.0.0.1:$PORT "$RUN/trainer" > "$RUN/trainer.log" 2>&1 &
 # Wait for the listener. Never probe the port: a connect+close wedges the trainer.

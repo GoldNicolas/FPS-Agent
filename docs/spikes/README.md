@@ -8,7 +8,7 @@ One file per spike, named `<letter>-<short-name>.md` (e.g. `A-headless-external-
 | B | Steps per second against N processes × K arenas on one node; pick defaults | CLUSTER | |
 | C | Fixed 60 Hz step and uncapped tick behave correctly headless | CLUSTER (LOCAL adds the C++ hooks) | |
 | D | Game processes on other nodes connect to the trainer | CLUSTER | |
-| E | Cradle GPU driver and our PyTorch build work together | CLUSTER | |
+| E | Cradle GPU driver and our PyTorch build work together | CLUSTER | [E-python-gpu.md](E-python-gpu.md) (**PASS**, 2026-11-11) |
 | F | Unreal-MCP `python-execute` builds a level from a JSON spec | LOCAL | |
 
 ## Template

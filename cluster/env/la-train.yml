@@ -1,0 +1,22 @@
+# Trainer env for the Learning Agents socket PPO path (cluster/learning_agents_python/).
+# Specs: cluster/learning_agents_python/README.md -> "Suggested la-train specs".
+#
+# Create it on the login node (D-021: everything under ~/beanRant):
+#   export CONDA_PKGS_DIRS=~/beanRant/envs/.pkgs
+#   CONDA_OVERRIDE_CUDA=12.4 ~/miniconda3/bin/conda env create -p ~/beanRant/envs/la-train -f cluster/env/la-train.yml
+#
+# CONDA_OVERRIDE_CUDA=12.4: the login node has no NVIDIA driver (no __cuda virtual package),
+# so without it the CUDA build of pytorch doesn't solve. 12.4 is what Cradle's driver
+# 550.54.14 supports (docs/cradle.md).
+# No "name:" on purpose: always create with -p, so the env never lands in ~/miniconda3/envs.
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - pytorch=2.5.1=cuda126*   # engine pin is 2.5.1+cu124; conda-forge has no cu124 build of 2.5.1
+  - cuda-version=12.6        # CUDA 12.6 runtime on the 12.4 driver (minor-version compatibility)
+  - numpy=1.26.4
+  - smart_open==7.3.0        # "=7.3.0" would pick 7.3.0.post1
+  - tensorboard
+  - gh

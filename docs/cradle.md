@@ -88,10 +88,14 @@ Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
 | Conda env `la-train` | `~/beanRant/envs/la-train`, created as a **prefix env** with the existing `~/miniconda3`: `conda env create -p ~/beanRant/envs/la-train -f cluster/env/la-train.yml`. Set `CONDA_PKGS_DIRS=~/beanRant/envs/.pkgs` while creating it so the downloaded packages also stay in `beanRant/` (delete that cache afterwards with `conda clean`). | L-003 |
 | `gh` login | `~/.config/gh/` (the only file outside `beanRant/`, written by `gh auth login`) | after L-003 |
 
-- **Activate in scripts:** `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train`.
+- **Use the env in scripts by full path:** `~/beanRant/envs/la-train/bin/python`, with `export PATH=~/beanRant/envs/la-train/bin:$PATH`. `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train` is **not enough** on this account (see the shell trap below; Spike E job 151697).
 - **conda-forge only:** the yml lists `channels: [conda-forge, nodefaults]`, because this account's conda config defaults to `defaults`.
 - **Slurm `#SBATCH` lines don't expand `~` or `$HOME`.** Use `/home/%u/...` there.
-- **Shell trap on this account:** login shells start with `VIRTUAL_ENV` and the front of `PATH` pointing at another project's env (`~/miniconda3/envs/locomujoco`). Always activate `la-train` explicitly, and set `VIRTUAL_ENV=$CONDA_PREFIX` before any `pip install`.
+- **Shell trap on this account:** login shells (and so Slurm jobs, which inherit them) start with:
+  - `VIRTUAL_ENV` and the front of `PATH` pointing at another project's env (`~/miniconda3/envs/locomujoco`);
+  - `PYTHONPATH=:/opt/phoenix-2.2.0/lib`.
+
+  `conda activate` swaps only base's `PATH` entry, which sits *behind* locomujoco's, so `python` stays locomujoco's (torch 2.13 / CUDA 13, which fails on our driver). Job scripts must `unset PYTHONPATH PYTHONHOME VIRTUAL_ENV`, set `PYTHONNOUSERSITE=1`, and call la-train's python by full path. Set `VIRTUAL_ENV=$CONDA_PREFIX` before any `pip install`.
 
 ## Questions for the admins (still open)
 - [ ] Max walltime is unlimited on `gpuq`. Is there a soft policy on job length or on how many GPUs and nodes one user may hold?
