@@ -4,16 +4,12 @@
 #include "GameFramework/Actor.h"
 #include "Common/FPSAgentTypes.h"
 #include "Learning/ReachTaskLogic.h"
-#include "LearningAgentsPPOTrainer.h"
 #include "ReachTaskActor.generated.h"
 
 class ABeanCharacter;
-class ULearningAgentsCritic;
-class ULearningAgentsInteractor;
 class ULearningAgentsManager;
-class ULearningAgentsPolicy;
-class ULearningAgentsTrainingEnvironment;
 class UStaticMeshComponent;
+class UTrainingSession;
 
 /**
  * Spike A (-Stage=SpikeA): K walled arenas (-Arenas=K), one bean agent each, walking to random targets.
@@ -64,7 +60,6 @@ private:
 
 	void BuildArenas();
 	bool SetupLearning();
-	bool LoadSnapshots(const FString& Dir);
 	void SpawnAgents();
 	ABeanCharacter* BeanOf(int32 AgentId) const;
 	float Distance2D(int32 AgentId) const;
@@ -73,18 +68,13 @@ private:
 	void ExitWith(int32 Code, const TCHAR* Reason);
 
 	UPROPERTY() TObjectPtr<ULearningAgentsManager> Manager;
-	UPROPERTY() TObjectPtr<ULearningAgentsInteractor> Interactor;
-	UPROPERTY() TObjectPtr<ULearningAgentsPolicy> Policy;
-	UPROPERTY() TObjectPtr<ULearningAgentsCritic> Critic;
-	UPROPERTY() TObjectPtr<ULearningAgentsTrainingEnvironment> Env;
-	UPROPERTY() TObjectPtr<ULearningAgentsPPOTrainer> Trainer;
+	UPROPERTY() TObjectPtr<UTrainingSession> Session;
 	/** By arena index. */
 	UPROPERTY() TArray<TObjectPtr<ABeanCharacter>> Beans;
 	/** Target markers by arena index (only when rendering). */
 	UPROPERTY() TArray<TObjectPtr<UStaticMeshComponent>> Markers;
 
 	FReachTaskSettings Settings;
-	FLearningAgentsPPOTrainingSettings TrainingSettings;
 	TArray<FVector> Centers;      // arena centers at agent-center height
 	TArray<FAgentState> Agents;   // by agent id
 	int32 BaseSeed = 0;
@@ -94,7 +84,6 @@ private:
 	double InferClock = 0.0;
 	bool bInfer = false;
 	bool bReady = false;
-	bool bTrainingStarted = false;
 	bool bInferStepped = false;
 	bool bExiting = false;
 

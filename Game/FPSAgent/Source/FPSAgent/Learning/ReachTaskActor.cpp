@@ -11,24 +11,18 @@
 #include "HAL/PlatformMisc.h"
 #include "Learning/ReachLearningClasses.h"
 #include "Learning/ReachTaskLogic.h"
-#include "LearningAgentsCommunicator.h"
-#include "LearningAgentsCritic.h"
+#include "Learning/TrainingSession.h"
 #include "LearningAgentsInteractor.h"
 #include "LearningAgentsManager.h"
-#include "LearningAgentsNeuralNetwork.h"
 #include "LearningAgentsPolicy.h"
 #include "LearningAgentsTrainer.h"
 #include "LearningAgentsTrainingEnvironment.h"
-#include "Async/Async.h"
 #include "HAL/IConsoleManager.h"
-#include "HAL/PlatformProcess.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/App.h"
 #include "Misc/CommandLine.h"
-#include "Misc/OutputDeviceRedirector.h"
 #include "Misc/Parse.h"
 #include "Misc/Paths.h"
-#include <atomic>
 
 namespace
 {
@@ -91,14 +85,6 @@ void AReachTaskActor::BeginPlay()
 		Centers.Num(), Args.bScripted ? TEXT("scripted (no policy)") : bInfer ? TEXT("infer") : TEXT("train (external trainer)"),
 		Args.ResumeFrom.IsEmpty() ? TEXT("(none)") : *Args.ResumeFrom, Settings.MaxEpisodeSteps, Settings.ReachRadiusCm,
 		Settings.TargetMinDistanceCm, Settings.TargetMaxDistanceCm);
-	if (!bInfer)
-	{
-		UE_LOG(LogFPSAgent, Display, TEXT("SpikeA: trainer settings: iterations=%d (= %.1f batches of %d) snapshotEvery=%d device=%s tensorboard=%d seed=%d"),
-			TrainingSettings.NumberOfIterations,
-			static_cast<double>(TrainingSettings.NumberOfIterations) / FMath::Max(1, TrainingSettings.IterationsPerGather),
-			TrainingSettings.IterationsPerGather, TrainingSettings.IterationsPerSnapshot,
-			Settings.bTrainOnGpu ? TEXT("GPU") : TEXT("CPU"), Settings.bUseTensorboard ? 1 : 0, BaseSeed);
-	}
 }
 
 void AReachTaskActor::BuildArenas()
@@ -141,122 +127,29 @@ bool AReachTaskActor::SetupLearning()
 {
 	const FFPSRunArgs& Args = FFPSRunArgs::Get();
 	Manager->SetMaxAgentNum(Agents.Num());
-
-	// The Make* helpers take UPARAM(ref) pointers, so they need plain local variables of the base types.
-	ULearningAgentsManager* Mgr = Manager;
-	ULearningAgentsInteractor* I = ULearningAgentsInteractor::MakeInteractor(Mgr, UReachInteractor::StaticClass(), TEXT("ReachInteractor"));
-	ULearningAgentsPolicy* P = I ? ULearningAgentsPolicy::MakePolicy(Mgr, I, ULearningAgentsPolicy::StaticClass(), TEXT("Policy"),
-		nullptr, nullptr, nullptr, true, true, true, FLearningAgentsPolicySettings(), BaseSeed) : nullptr;
-	Interactor = I;
-	Policy = P;
-	if (!I || !P)
-	{
-		ExitWith(1, TEXT("Learning Agents interactor/policy setup failed"));
-		return false;
-	}
-
-	ULearningAgentsCritic* C = nullptr;
-	if (!bInfer)
-	{
-		C = ULearningAgentsCritic::MakeCritic(Mgr, I, P, ULearningAgentsCritic::StaticClass(), TEXT("Critic"),
-			nullptr, true, FLearningAgentsCriticSettings(), BaseSeed);
-		Critic = C;
-	}
-
-	if (!Args.ResumeFrom.IsEmpty() && !LoadSnapshots(Args.ResumeFrom))
-	{
-		ExitWith(2, TEXT("-ResumeFrom is missing snapshot files"));
-		return false;
-	}
-	if (bInfer)
-	{
-		return true;
-	}
-
-	ULearningAgentsTrainingEnvironment* E = ULearningAgentsTrainingEnvironment::MakeTrainingEnvironment(Mgr, UReachTrainingEnv::StaticClass(), TEXT("ReachEnv"));
-	Env = E;
-
-	FLearningAgentsTrainerProcessSettings Process;
-	Process.TaskName = TEXT("FPSAgent");
-	FLearningAgentsSocketCommunicatorSettings Socket;
-	Socket.bUseExternalTrainingProcess = true; // never spawn a local trainer; address/port come from -LearningAgents* flags
-
-	// Watchdog. Learning Agents' connect loop counts only its 1 ms sleeps toward the timeout, not the time spent inside
-	// each blocking connect(), so an unreachable trainer can block this thread far longer than -LearningAgentsTimeout
-	// (hours on Windows, minutes per attempt behind a firewall). A real wall-clock deadline force-exits with code 1.
-	// We must not probe the trainer port ourselves: the Python trainer wedges on a connection that closes before
-	// sending its config.
-	float ConnectTimeout = Socket.Timeout;
-	FParse::Value(FCommandLine::Get(), TEXT("LearningAgentsTimeout="), ConnectTimeout);
-	const TSharedRef<std::atomic<bool>> bConnectDone = MakeShared<std::atomic<bool>>(false);
-	if (!GIsEditor)
-	{
-		const double Deadline = FMath::Max(1.0, static_cast<double>(ConnectTimeout)) + 15.0;
-		Async(EAsyncExecution::Thread, [bConnectDone, Deadline]()
-		{
-			const double Start = FPlatformTime::Seconds();
-			while (!bConnectDone->load())
-			{
-				if (FPlatformTime::Seconds() - Start > Deadline)
-				{
-					UE_LOG(LogFPSAgent, Error, TEXT("SpikeA: exiting (code 1): no trainer connection after %.0f s (wall clock). Start the trainer first and wait for 'Server listening on'."), Deadline);
-					GLog->Flush();
-					FPlatformMisc::RequestExitWithStatus(true, 1);
-					return;
-				}
-				FPlatformProcess::Sleep(0.2f);
-			}
-		});
-	}
-	const FLearningAgentsCommunicator Communicator = ULearningAgentsCommunicatorLibrary::MakeSocketTrainingProcess(Process, Socket);
-	bConnectDone->store(true);
-
-	FLearningAgentsPPOTrainerSettings TrainerSettings;
-	TrainerSettings.MaxEpisodeStepNum = Settings.MaxEpisodeSteps;
-	Trainer = ULearningAgentsPPOTrainer::MakePPOTrainer(Mgr, I, E, P, C, Communicator,
-		ULearningAgentsPPOTrainer::StaticClass(), TEXT("PPOTrainer"), TrainerSettings);
-	if (!E || !C || !Trainer)
-	{
-		ExitWith(1, TEXT("Learning Agents trainer setup failed"));
-		return false;
-	}
-
+	FTrainingSessionConfig Config;
+	Config.LogPrefix = TEXT("SpikeA");
+	Config.InteractorClass = UReachInteractor::StaticClass();
+	Config.EnvClass = UReachTrainingEnv::StaticClass();
+	Config.bInfer = bInfer;
+	Config.Seed = BaseSeed;
+	Config.ResumeFrom = Args.ResumeFrom;
+	Config.bResetAgentsOnUpdate = true;
+	Config.Trainer.MaxEpisodeStepNum = Settings.MaxEpisodeSteps;
+	FLearningAgentsPPOTrainingSettings& T = Config.Training;
 	// The trainer counts gradient iterations, IterationsPerGather (32) per experience batch (C-005); -Batches converts.
-	TrainingSettings.NumberOfIterations = Args.GradientIterations(TrainingSettings.IterationsPerGather, Settings.MaxIterations);
-	TrainingSettings.bSaveSnapshots = true;
-	TrainingSettings.IterationsPerSnapshot = FMath::Max(1, Settings.IterationsPerSnapshot);
-	TrainingSettings.bUseTensorboard = Settings.bUseTensorboard;
-	TrainingSettings.Device = Settings.bTrainOnGpu ? ELearningAgentsTrainingDevice::GPU : ELearningAgentsTrainingDevice::CPU;
-	TrainingSettings.RandomSeed = BaseSeed;
-	return true;
-}
-
-bool AReachTaskActor::LoadSnapshots(const FString& Dir)
-{
-	TArray<TPair<FString, ULearningAgentsNeuralNetwork*>> Items;
-	Items.Emplace(TEXT("encoder.bin"), Policy->GetEncoderNetworkAsset());
-	Items.Emplace(TEXT("policy.bin"), Policy->GetPolicyNetworkAsset());
-	Items.Emplace(TEXT("decoder.bin"), Policy->GetDecoderNetworkAsset());
-	if (Critic)
+	T.NumberOfIterations = Args.GradientIterations(T.IterationsPerGather, Settings.MaxIterations);
+	T.bSaveSnapshots = true;
+	T.IterationsPerSnapshot = FMath::Max(1, Settings.IterationsPerSnapshot);
+	T.bUseTensorboard = Settings.bUseTensorboard;
+	T.Device = Settings.bTrainOnGpu ? ELearningAgentsTrainingDevice::GPU : ELearningAgentsTrainingDevice::CPU;
+	T.RandomSeed = BaseSeed;
+	Session = NewObject<UTrainingSession>(this);
+	if (!Session->Setup(*Manager, Config))
 	{
-		Items.Emplace(TEXT("critic.bin"), Critic->GetCriticNetworkAsset());
+		bExiting = true;
+		return false;
 	}
-	for (const TPair<FString, ULearningAgentsNeuralNetwork*>& Item : Items)
-	{
-		const FString Path = FPaths::Combine(Dir, Item.Key);
-		if (!Item.Value || !FPaths::FileExists(Path))
-		{
-			UE_LOG(LogFPSAgent, Error, TEXT("SpikeA: snapshot not found: %s"), *Path);
-			return false;
-		}
-	}
-	for (const TPair<FString, ULearningAgentsNeuralNetwork*>& Item : Items)
-	{
-		FFilePath File;
-		File.FilePath = FPaths::Combine(Dir, Item.Key);
-		Item.Value->LoadNetworkFromSnapshot(File);
-	}
-	UE_LOG(LogFPSAgent, Display, TEXT("SpikeA: loaded %d snapshots from %s"), Items.Num(), *Dir);
 	return true;
 }
 
@@ -412,18 +305,7 @@ void AReachTaskActor::LogStats()
 void AReachTaskActor::ExitWith(int32 Code, const TCHAR* Reason)
 {
 	bExiting = true;
-	if (Code == 0)
-	{
-		UE_LOG(LogFPSAgent, Display, TEXT("SpikeA: exiting (code 0): %s"), Reason);
-	}
-	else
-	{
-		UE_LOG(LogFPSAgent, Error, TEXT("SpikeA: exiting (code %d): %s"), Code, Reason);
-	}
-	if (!GIsEditor)
-	{
-		FPlatformMisc::RequestExitWithStatus(false, static_cast<uint8>(Code));
-	}
+	UTrainingSession::ExitProcess(TEXT("SpikeA"), Code, Reason);
 }
 
 void AReachTaskActor::Tick(float DeltaSeconds)
@@ -470,30 +352,25 @@ void AReachTaskActor::Tick(float DeltaSeconds)
 			}
 			else
 			{
-				Policy->RunInference(0.f);
+				Session->GetPolicy()->RunInference(0.f);
 			}
 			bInferStepped = true;
 		}
 	}
 	else
 	{
-		// RunTraining would start a NEW session if called after the trainer finished, so stop as soon as it ends.
-		Trainer->RunTraining(TrainingSettings, FLearningAgentsTrainingGameSettings(), true, true);
-		if (Trainer->HasTrainingFailed())
+		switch (Session->RunTrainingStep())
 		{
+		case UTrainingSession::EStatus::Failed:
 			LogStats();
 			ExitWith(1, TEXT("training failed: trainer unreachable, timed out or crashed (see LogLearning above)"));
 			return;
-		}
-		if (Trainer->IsTraining())
-		{
-			bTrainingStarted = true;
-		}
-		else if (bTrainingStarted)
-		{
+		case UTrainingSession::EStatus::Finished:
 			LogStats();
 			ExitWith(0, TEXT("trainer finished"));
 			return;
+		default:
+			break;
 		}
 	}
 
