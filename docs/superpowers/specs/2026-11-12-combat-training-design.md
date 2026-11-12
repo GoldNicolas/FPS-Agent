@@ -101,8 +101,30 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 
 **Human-likeness settings** (README → *Human-likeness*): reaction delay (observations delayed by N ms) and aim noise exist from the start, but they're **off in training**. They're raised later for in-game difficulty levels.
 
-## 3. Reward (not agreed yet)
-To cover: every term with its starting weight, the clear bonus as above, termination versus truncation, and logging.
+## 3. Reward (agreed 2026-11-12)
+- All weights live in one `FCombatRewardSettings` (settings, hard rule 7). The aim-helper weight is per stage (§5).
+- Each term is summed over the 4 ticks of a decision by the `RewardLedger` and logged on its own (§1, point 5).
+
+| Term | Amount | Notes |
+|---|---|---|
+| Damage dealt | `+ damage / 150` | Health plus armor actually removed (capped at what the bot had). A headshot kill from full = +1.0; a body shot ≈ +0.27. No separate headshot bonus: the damage table already pays 4×. |
+| Kill | `+1.0` | |
+| First sighting | `+0.2` | Once per bot per episode: the first decision on which that bot passes the line-of-sight-in-FOV check. |
+| Clear bonus | `+0.5 + 1.5 × (time left / time limit)` | Once, on the decision when the last bot dies (D-022). |
+| Aim helper (potential-based) | `γ·Φ(s') − Φ(s)`, with `Φ = W × (1 − min(e / 30°, 1))` | `e` = aim error to the head of the nearest **visible** enemy (not remembered). `Φ = 0` when none is visible and at episode end. `W` per stage: 0.2 in S0 and S1, 0.1 in S2, 0 in S3. Potential-based, so it can't change the optimal policy (research §3). Φ is never negative, so spotting an enemy can't cost reward. |
+| Damage taken | `− damage / 150` | From S2 on (shooting bots). |
+| Death | `−1.0` | **Termination.** |
+| Shot that hits no enemy | `−0.01` per bullet | A body hit pays about 27× more, so "never shoot" never wins. |
+| Time | `−0.01` per second | Anti-camping. Mild, because the clear bonus carries the speed incentive. |
+
+- **Episode endings:**
+  - death → Termination;
+  - all bots dead → Termination;
+  - time limit → **Truncation**: the trainer bootstraps the value, so a timeout isn't treated as a failure (research §1).
+- **Completion rule (D-022):** completion is computed from state (agent dead / bots alive / time used), never from flags set while computing rewards. All one-off terms are paid once.
+- **Scale check:** a perfect 3-bot episode is about +8; an early death about −2, inside the trainer's comfortable 1–10 range.
+  - The 5.7 trainer clips negative advantages to 0 (research §1), so every good behaviour has a positive term and the penalties stay small.
+- **Metrics, not rewards** (logged per stats window and in `-Eval`): accuracy, headshot %, time to clear, kills and deaths, damage per life, shots per kill, first-sighting time, and each reward term's share of the return.
 
 ## 4. Scripted bots (not agreed yet)
 To cover: the behaviours (static, strafe, peek, crouch, patrol, explore, investigate, hunt, shoot), paths on the tile graph, fair senses, aim and reaction model, and difficulty parameters.
