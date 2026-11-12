@@ -16,7 +16,7 @@ _Last updated: 2026-11-12 by LOCAL_
     - 31 C++ tests pass.
     - The PPO settings the game sends are listed in the spike doc → *Expected trainer config*. CLUSTER checks them against the saved `Configs/*.json` in L-004.
   - **2026-11-12: fix pack published as `build-07eac52`** (C-003/C-004/C-005, 33/33 C++ tests). Request L-005 asks CLUSTER to confirm it.
-  - Next: the combat training design (S0–S3, built and shipped one stage at a time): reward settings with a clear-time bonus, scripted bots that patrol, explore and hunt with fair senses, an automatic difficulty ramp inside each stage, 15 Hz decisions. The design is being agreed with the user; the spec will go in `docs/superpowers/specs/`.
+  - **In progress: the combat training design** (S0–S3, built and shipped one stage at a time), agreed section by section with the user. Spec draft: [`superpowers/specs/2026-11-12-combat-training-design.md`](superpowers/specs/2026-11-12-combat-training-design.md). Research behind it: [`research/rl-reward-and-optimization.md`](research/rl-reward-and-optimization.md). So far: a clear bonus `0.5 + 1.5 × time left`, bots with fair senses that patrol, explore and hunt, stages plus an automatic difficulty ramp, 15 decisions/s with discount 0.995. No code yet.
 - **CLUSTER:**
   - L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit).
   - L-003 **done**: Spike E **PASS** ([`spikes/E-python-gpu.md`](spikes/E-python-gpu.md)). The `la-train` env (torch 2.5.1 CUDA 12.6) computes correctly on the A100.

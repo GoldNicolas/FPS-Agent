@@ -153,7 +153,8 @@ FPS-Agent/
     ├── maps/                  # map preview PNGs (LOCAL)
     ├── spikes/                # spike reports
     ├── runs/                  # run reports (CLUSTER)
-    └── superpowers/plans/     # implementation plans (LOCAL)
+    ├── research/              # research notes behind design choices (e.g. reward design, PPO tuning)
+    └── superpowers/           # specs/ (designs agreed with the user) and plans/ (implementation plans), LOCAL
 ```
 
 Version control: a private GitHub repo with a single `main` branch. **Git LFS** handles `*.uasset` and `*.umap`. Builds and snapshots go to GitHub Releases, never git. See [Collaboration workflow](#collaboration-workflow-local--cluster-via-github).
