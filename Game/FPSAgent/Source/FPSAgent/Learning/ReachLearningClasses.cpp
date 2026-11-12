@@ -31,8 +31,6 @@ void UReachInteractor::GatherAgentObservation_Implementation(FLearningAgentsObse
 	Elements.Add(TEXT("Target"), ULearningAgentsObservations::MakeLocationObservation(InObservationObject, Target, FTransform(AgentLocation), TEXT("Target")));
 	Elements.Add(TEXT("Velocity"), ULearningAgentsObservations::MakeVelocityObservation(InObservationObject, Velocity, FTransform::Identity, TEXT("Velocity")));
 	OutObservationObjectElement = ULearningAgentsObservations::MakeStructObservation(InObservationObject, Elements);
-
-	if (Task) { Task->NoteDecision(AgentId); }
 }
 
 void UReachInteractor::SpecifyAgentAction_Implementation(FLearningAgentsActionSchemaElement& OutActionSchemaElement, ULearningAgentsActionSchema* InActionSchema)
@@ -58,8 +56,10 @@ void UReachTrainingEnv::GatherAgentReward_Implementation(float& OutReward, const
 void UReachTrainingEnv::GatherAgentCompletion_Implementation(ELearningAgentsCompletion& OutCompletion, const int32 AgentId)
 {
 	// Reaching the target ends the episode. The step cap (MaxEpisodeStepNum) is a truncation handled by the PPO trainer.
+	// Learning Agents asks for completions BEFORE rewards, so this must check the current position, not a flag that
+	// TakeStepReward sets: the old flag ended episodes one step late and paid the reach bonus twice (C-004).
 	AReachTaskActor* Task = TaskOf(this);
-	OutCompletion = (Task && Task->IsAgentReached(AgentId)) ? ELearningAgentsCompletion::Termination : ELearningAgentsCompletion::Running;
+	OutCompletion = (Task && Task->IsAgentAtTarget(AgentId)) ? ELearningAgentsCompletion::Termination : ELearningAgentsCompletion::Running;
 }
 
 void UReachTrainingEnv::ResetAgentEpisode_Implementation(const int32 AgentId)

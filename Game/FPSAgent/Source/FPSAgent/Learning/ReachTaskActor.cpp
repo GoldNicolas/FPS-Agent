@@ -93,8 +93,10 @@ void AReachTaskActor::BeginPlay()
 		Settings.TargetMinDistanceCm, Settings.TargetMaxDistanceCm);
 	if (!bInfer)
 	{
-		UE_LOG(LogFPSAgent, Display, TEXT("SpikeA: trainer settings: iterations=%d snapshotEvery=%d device=%s tensorboard=%d seed=%d"),
-			TrainingSettings.NumberOfIterations, TrainingSettings.IterationsPerSnapshot,
+		UE_LOG(LogFPSAgent, Display, TEXT("SpikeA: trainer settings: iterations=%d (= %.1f batches of %d) snapshotEvery=%d device=%s tensorboard=%d seed=%d"),
+			TrainingSettings.NumberOfIterations,
+			static_cast<double>(TrainingSettings.NumberOfIterations) / FMath::Max(1, TrainingSettings.IterationsPerGather),
+			TrainingSettings.IterationsPerGather, TrainingSettings.IterationsPerSnapshot,
 			Settings.bTrainOnGpu ? TEXT("GPU") : TEXT("CPU"), Settings.bUseTensorboard ? 1 : 0, BaseSeed);
 	}
 }
@@ -219,7 +221,8 @@ bool AReachTaskActor::SetupLearning()
 		return false;
 	}
 
-	TrainingSettings.NumberOfIterations = Args.Iterations > 0 ? Args.Iterations : Settings.MaxIterations;
+	// The trainer counts gradient iterations, IterationsPerGather (32) per experience batch (C-005); -Batches converts.
+	TrainingSettings.NumberOfIterations = Args.GradientIterations(TrainingSettings.IterationsPerGather, Settings.MaxIterations);
 	TrainingSettings.bSaveSnapshots = true;
 	TrainingSettings.IterationsPerSnapshot = FMath::Max(1, Settings.IterationsPerSnapshot);
 	TrainingSettings.bUseTensorboard = Settings.bUseTensorboard;
@@ -315,14 +318,6 @@ float AReachTaskActor::Distance2D(int32 AgentId) const
 	return FVector::Dist2D(GetAgentLocation(AgentId), GetTarget(AgentId));
 }
 
-void AReachTaskActor::NoteDecision(int32 AgentId)
-{
-	if (Agents.IsValidIndex(AgentId))
-	{
-		Agents[AgentId].DecisionDistance = Distance2D(AgentId);
-	}
-}
-
 void AReachTaskActor::ApplyMove(int32 AgentId, float X, float Y)
 {
 	if (!Agents.IsValidIndex(AgentId))
@@ -342,20 +337,14 @@ float AReachTaskActor::TakeStepReward(int32 AgentId)
 	{
 		return 0.f;
 	}
-	FAgentState& A = Agents[AgentId];
-	const float Distance = Distance2D(AgentId);
-	A.bReached = FPSReach::IsReached(Distance, Settings);
-	const float Reward = FPSReach::StepReward(A.DecisionDistance, Distance, A.bReached, StepSeconds, Settings);
-	A.DecisionDistance = Distance; // progress is counted once, even when no observation follows (scripted mode)
-	A.Return += Reward;
-	++A.Steps;
 	++WindowSteps;
-	return Reward;
+	return Agents[AgentId].Ep.Score(Distance2D(AgentId), StepSeconds, Settings);
 }
 
-bool AReachTaskActor::IsAgentReached(int32 AgentId) const
+bool AReachTaskActor::IsAgentAtTarget(int32 AgentId) const
 {
-	return Agents.IsValidIndex(AgentId) && Agents[AgentId].bReached;
+	return Agents.IsValidIndex(AgentId) && Agents[AgentId].Arena != INDEX_NONE
+		&& FPSReach::FReachEpisode::IsTerminal(Distance2D(AgentId), Settings);
 }
 
 void AReachTaskActor::ResetAgent(int32 AgentId)
@@ -365,25 +354,22 @@ void AReachTaskActor::ResetAgent(int32 AgentId)
 		return;
 	}
 	FAgentState& A = Agents[AgentId];
-	if (A.Steps > 0)
+	if (A.Ep.Steps > 0)
 	{
 		RecordEpisodeEnd(A);
 	}
 	if (TotalEpisodes <= 6)
 	{
 		UE_LOG(LogFPSAgent, Display, TEXT("SpikeA: reset agent %d (episode %d): steps=%d reached=%d distance=%.0f return=%.3f"),
-			AgentId, A.Episode, A.Steps, A.bReached ? 1 : 0, Distance2D(AgentId), A.Return);
+			AgentId, A.EpisodeCount, A.Ep.Steps, A.Ep.bReached ? 1 : 0, Distance2D(AgentId), A.Ep.Return);
 	}
-	FRandomStream Rng(FPSReach::EpisodeSeed(BaseSeed, A.Arena, A.Episode));
-	++A.Episode;
+	FRandomStream Rng(FPSReach::EpisodeSeed(BaseSeed, A.Arena, A.EpisodeCount));
+	++A.EpisodeCount;
 	const FVector Center = Centers[A.Arena];
 	const FVector Start = FPSReach::SampleStart(Rng, Center, Settings);
 	A.Target = FPSReach::SampleTarget(Rng, Center, Start, Settings);
-	A.Steps = 0;
-	A.Return = 0.f;
-	A.bReached = false;
 	A.LastMove = FVector::ZeroVector;
-	A.DecisionDistance = FVector::Dist2D(Start, A.Target);
+	A.Ep.Begin(FVector::Dist2D(Start, A.Target));
 
 	if (ABeanCharacter* Bean = BeanOf(AgentId))
 	{
@@ -403,8 +389,8 @@ void AReachTaskActor::RecordEpisodeEnd(const FAgentState& A)
 {
 	++TotalEpisodes;
 	++WindowEpisodes;
-	WindowReached += A.bReached ? 1 : 0;
-	WindowReturn += A.Return;
+	WindowReached += A.Ep.bReached ? 1 : 0;
+	WindowReturn += A.Ep.Return;
 }
 
 void AReachTaskActor::LogStats()
@@ -471,7 +457,7 @@ void AReachTaskActor::Tick(float DeltaSeconds)
 				{
 					if (Agents[Id].Arena == INDEX_NONE) { continue; }
 					TakeStepReward(Id);
-					if (Agents[Id].bReached || Agents[Id].Steps >= Settings.MaxEpisodeSteps) { ResetAgent(Id); }
+					if (IsAgentAtTarget(Id) || Agents[Id].Ep.Steps >= Settings.MaxEpisodeSteps) { ResetAgent(Id); }
 				}
 			}
 			if (FFPSRunArgs::Get().bScripted)

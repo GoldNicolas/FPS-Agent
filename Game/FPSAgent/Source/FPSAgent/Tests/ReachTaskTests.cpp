@@ -82,4 +82,69 @@ bool FFPSReachRewardTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSReachEpisodeOrderTest, "FPSAgent.Learning.Reach.EpisodeOrder",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSReachEpisodeOrderTest::RunTest(const FString& Parameters)
+{
+	// C-004: Learning Agents asks for the completion BEFORE the reward on every step (RunTraining: GatherCompletions,
+	// GatherRewards, ProcessExperience); playback scores first, then checks. Both orders must end the episode on the
+	// reaching step and pay the reach bonus once.
+	FReachTaskSettings S; // radius 100, bonus 5, 1 per meter, 0.5 per second
+	const float Dt = 1.f / 60.f;
+	const TArray<float> Path = { 500.f, 300.f, 90.f, 60.f, 40.f }; // within reach from index 2 on
+
+	FPSReach::FReachEpisode Train;
+	Train.Begin(800.f);
+	int32 TrainSteps = 0;
+	for (const float D : Path)
+	{
+		const bool bEnds = FPSReach::FReachEpisode::IsTerminal(D, S); // completion first ...
+		Train.Score(D, Dt, S);                                          // ... then the reward
+		++TrainSteps;
+		if (bEnds) { break; }
+	}
+
+	FPSReach::FReachEpisode Play;
+	Play.Begin(800.f);
+	int32 PlaySteps = 0;
+	for (const float D : Path)
+	{
+		Play.Score(D, Dt, S);
+		++PlaySteps;
+		if (FPSReach::FReachEpisode::IsTerminal(D, S)) { break; }
+	}
+
+	const float Expected = (800.f - 90.f) / 100.f + 5.f - 3.f * 0.5f * Dt;
+	TestEqual(TEXT("training order ends on the reaching step"), TrainSteps, 3);
+	TestEqual(TEXT("playback order ends on the same step"), PlaySteps, 3);
+	TestEqual(TEXT("training return has one bonus"), Train.Return, Expected, 1e-4f);
+	TestEqual(TEXT("playback return matches training"), Play.Return, Expected, 1e-4f);
+	TestTrue(TEXT("reached"), Train.bReached);
+	TestEqual(TEXT("steps counted"), Train.Steps, 3);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSReachBonusOnceTest, "FPSAgent.Learning.Reach.BonusOnce",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSReachBonusOnceTest::RunTest(const FString& Parameters)
+{
+	FReachTaskSettings S;
+	const float Dt = 1.f / 60.f;
+	FPSReach::FReachEpisode E;
+	E.Begin(150.f);
+	const float First = E.Score(90.f, Dt, S);
+	const float Second = E.Score(80.f, Dt, S); // still in reach: scored again before a reset
+	TestEqual(TEXT("reaching step pays progress + bonus"), First, 0.6f + 5.f - 0.5f * Dt, 1e-5f);
+	TestEqual(TEXT("no second bonus while staying in reach"), Second, 0.1f - 0.5f * Dt, 1e-5f);
+
+	E.Begin(700.f);
+	TestFalse(TEXT("new episode: not reached"), E.bReached);
+	TestEqual(TEXT("new episode: return cleared"), E.Return, 0.f);
+	TestEqual(TEXT("new episode: steps cleared"), E.Steps, 0);
+	TestEqual(TEXT("progress measured from the new start"), E.Score(600.f, Dt, S), 1.f - 0.5f * Dt, 1e-5f);
+	TestFalse(TEXT("terminal is a pure distance check (outside)"), FPSReach::FReachEpisode::IsTerminal(101.f, S));
+	TestTrue(TEXT("terminal is a pure distance check (inside)"), FPSReach::FReachEpisode::IsTerminal(100.f, S));
+	return true;
+}
+
 #endif

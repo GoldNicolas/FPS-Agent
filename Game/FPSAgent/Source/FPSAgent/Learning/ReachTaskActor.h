@@ -3,6 +3,7 @@
 #include "CoreMinimal.h"
 #include "GameFramework/Actor.h"
 #include "Common/FPSAgentTypes.h"
+#include "Learning/ReachTaskLogic.h"
 #include "LearningAgentsPPOTrainer.h"
 #include "ReachTaskActor.generated.h"
 
@@ -36,12 +37,11 @@ public:
 	FVector GetAgentLocation(int32 AgentId) const;
 	FVector GetAgentVelocity(int32 AgentId) const;
 	FVector GetTarget(int32 AgentId) const;
-	/** The policy just observed this agent: remember the distance for the next step's progress reward. */
-	void NoteDecision(int32 AgentId);
 	void ApplyMove(int32 AgentId, float X, float Y);
-	/** Reward for the step that just ran; also updates the reached flag and episode stats. */
+	/** Reward for the step that just ran (FPSReach::FReachEpisode::Score: the reach bonus is paid once per episode). */
 	float TakeStepReward(int32 AgentId);
-	bool IsAgentReached(int32 AgentId) const;
+	/** The episode ends now: the agent is within reach of its target. Pure check of the current position (C-004). */
+	bool IsAgentAtTarget(int32 AgentId) const;
 	/** New episode: seeded start and target, teleport, clear per-episode state. */
 	void ResetAgent(int32 AgentId);
 
@@ -54,11 +54,10 @@ private:
 	{
 		int32 Arena = INDEX_NONE;
 		FVector Target = FVector::ZeroVector;
-		float DecisionDistance = 0.f;
-		int32 Episode = 0;
-		int32 Steps = 0;
-		float Return = 0.f;
-		bool bReached = false;
+		/** Episodes started so far (seeds the next one). */
+		int32 EpisodeCount = 0;
+		/** Reward bookkeeping of the current episode. */
+		FPSReach::FReachEpisode Ep;
 		/** Last move input, held between policy decisions (playback in the editor runs above 60 fps). */
 		FVector LastMove = FVector::ZeroVector;
 	};

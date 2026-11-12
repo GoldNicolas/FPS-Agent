@@ -61,4 +61,23 @@ namespace FPSReach
 		const float ProgressMeters = (PrevDistanceCm - DistanceCm) / 100.f;
 		return ProgressMeters * S.ProgressRewardPerMeter - S.TimePenaltyPerSecond * DeltaSeconds + (bReached ? S.ReachBonus : 0.f);
 	}
+
+	void FReachEpisode::Begin(float StartDistanceCm)
+	{
+		LastDistanceCm = StartDistanceCm;
+		Return = 0.f;
+		Steps = 0;
+		bReached = false;
+	}
+
+	float FReachEpisode::Score(float DistanceCm, float DeltaSeconds, const FReachTaskSettings& S)
+	{
+		const bool bPayBonus = IsReached(DistanceCm, S) && !bReached;
+		const float Reward = StepReward(LastDistanceCm, DistanceCm, bPayBonus, DeltaSeconds, S);
+		bReached = bReached || bPayBonus;
+		LastDistanceCm = DistanceCm;
+		Return += Reward;
+		++Steps;
+		return Reward;
+	}
 }

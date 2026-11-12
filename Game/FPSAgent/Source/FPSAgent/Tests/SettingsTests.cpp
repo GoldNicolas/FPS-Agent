@@ -47,6 +47,17 @@ bool FFPSRunArgsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("scripted implies infer"), Sc.bInfer);
 	TestTrue(TEXT("resume unset by default"), D.ResumeFrom.IsEmpty());
 	TestEqual(TEXT("iterations 0 = settings"), D.Iterations, 0);
+
+	// C-005: the trainer counts gradient iterations (IterationsPerGather = 32 per experience batch).
+	const FFPSRunArgs Bt = FFPSRunArgs::Parse(TEXT("-Stage=SpikeA -Batches=30"));
+	TestEqual(TEXT("batches"), Bt.Batches, 30);
+	TestEqual(TEXT("batches -> gradient iterations"), Bt.GradientIterations(32, 1000000), 960);
+	TestEqual(TEXT("-Iterations passes through"), L.GradientIterations(32, 1000000), 200);
+	TestEqual(TEXT("settings when neither is given"), D.GradientIterations(32, 1000000), 1000000);
+	TestEqual(TEXT("batches win over iterations"), FFPSRunArgs::Parse(TEXT("-Batches=2 -Iterations=7")).GradientIterations(32, 5), 64);
+	TestEqual(TEXT("negative batches clamped"), FFPSRunArgs::Parse(TEXT("-Batches=-3")).Batches, 0);
+	TestEqual(TEXT("huge batches saturate"), FFPSRunArgs::Parse(TEXT("-Batches=2000000000")).GradientIterations(32, 5), MAX_int32);
+	TestEqual(TEXT("batches unset by default"), D.Batches, 0);
 	return true;
 }
 

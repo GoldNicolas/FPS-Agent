@@ -25,4 +25,27 @@ namespace FPSReach
 
 	/** Progress (meters closed) * ProgressRewardPerMeter - TimePenaltyPerSecond * dt, + ReachBonus on the reaching step. */
 	FPSAGENT_API float StepReward(float PrevDistanceCm, float DistanceCm, bool bReached, float DeltaSeconds, const FReachTaskSettings& S);
+
+	/**
+	 * One agent's episode bookkeeping, shared by training and playback (fix for C-004).
+	 * Learning Agents asks for the completion BEFORE the reward on each step, while playback scores first. So the end of
+	 * an episode is a pure function of the current distance (IsTerminal), never a flag set while scoring, and Score pays
+	 * the reach bonus at most once per episode, in whatever order the two are called.
+	 */
+	struct FPSAGENT_API FReachEpisode
+	{
+		/** Distance at the previous Score (or the episode start): the base for the progress reward. */
+		float LastDistanceCm = 0.f;
+		float Return = 0.f;
+		int32 Steps = 0;
+		/** The target was reached (and the bonus paid) this episode. */
+		bool bReached = false;
+
+		/** Starts a new episode at this distance to the target. */
+		void Begin(float StartDistanceCm);
+		/** Reward for the step that just ran, ending at DistanceCm. */
+		float Score(float DistanceCm, float DeltaSeconds, const FReachTaskSettings& S);
+		/** The episode ends now (target within reach). Safe to call any number of times, before or after Score. */
+		static bool IsTerminal(float DistanceCm, const FReachTaskSettings& S) { return IsReached(DistanceCm, S); }
+	};
 }

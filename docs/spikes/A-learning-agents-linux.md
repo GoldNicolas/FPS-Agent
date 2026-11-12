@@ -60,7 +60,9 @@ So, judged by the trainer's `Avg Rew Sum` line or the game's `avgReturn`, a lear
 7. **Expect slow startup.** glibc 2.28 makes engine startup slower (`dlopen`), a one-off cost per process. Use `-LearningAgentsTimeout=60` or more.
 
 ## Suggested CLUSTER procedure
-This is a sketch. The CLUSTER side owns the real `cluster/slurm/` script.
+This is a sketch. The CLUSTER side owns the real script, [`cluster/slurm/spikeA.sbatch`](../../cluster/slurm/spikeA.sbatch), and that's the one to run.
+
+`-Batches=` needs the C-004 fix build or newer (`docs/builds.md`). With `build-cccd809`, use `-Iterations=` with batches × 32 (C-005).
 
 ```bash
 # Paths per D-021 / docs/cradle.md -> "Our paths": everything under ~/beanRant
@@ -72,22 +74,24 @@ sha256sum -c SHA256SUMS && tar xzf FPSAgent-Linux-<sha>.tar.gz && cat Linux/BUIL
 BUILD=~/beanRant/builds/<sha>/Linux; REPO=~/beanRant/FPS-Agent
 RUN=~/beanRant/runs/spikeA-$(date +%Y%m%d)-$SLURM_JOB_ID; mkdir -p "$RUN"   # run ID per docs/runs/README.md
 PORT=$((40000 + SLURM_JOB_ID % 20000))
-source ~/miniconda3/bin/activate ~/beanRant/envs/la-train
-python3 -u $REPO/cluster/learning_agents_python/train.py FPSAgent -l \
+# Call la-train's python by full path: on this account `activate` still runs another env's python (C-003, docs/cradle.md)
+unset PYTHONPATH PYTHONHOME VIRTUAL_ENV; export PYTHONNOUSERSITE=1
+PY=~/beanRant/envs/la-train/bin/python
+"$PY" -s -u $REPO/cluster/learning_agents_python/train.py FPSAgent -l \
   --nne-cpu-path $REPO/cluster/learning_agents_python/nne_runtime_basic_cpu \
   Socket 127.0.0.1:$PORT "$RUN/trainer" > "$RUN/trainer.log" 2>&1 &
 until grep -q "Server listening on" "$RUN/trainer.log"; do sleep 1; done   # do NOT probe the port
 for i in 0 1; do
   "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended -Stage=SpikeA -Arenas=16 -Seed=$((SLURM_JOB_ID*1000+i)) \
-    -Iterations=150 -LearningAgentsUseExternalTrainingProcess -LearningAgentsIpAddress=127.0.0.1 \
+    -Batches=30 -LearningAgentsUseExternalTrainingProcess -LearningAgentsIpAddress=127.0.0.1 \
     -LearningAgentsPort=$PORT -LearningAgentsTimeout=120 -abslog="$RUN/game_$i.log" &
 done
-wait   # games exit 0 when the trainer reaches 150 iterations
+wait   # games exit 0 when the trainer finishes 30 batches (960 gradient iterations)
 grep -E "^INFO: *Iter|Iter:" "$RUN/trainer.log" | head -3; grep -E "Iter:" "$RUN/trainer.log" | tail -3
 grep "SpikeA stats" "$RUN"/game_0.log | tail -3
 ls -l "$RUN"/trainer/FPSAgent*/Snapshots/
 
-# 2. resume test: same as 1 with -ResumeFrom=<run1>/trainer/FPSAgent0/Snapshots and -Iterations=30
+# 2. resume test: same as 1 with -ResumeFrom=<run1>/trainer/FPSAgent0/Snapshots and -Batches=2
 #    -> the first Iter lines should already be near run 1's final Avg Rew Sum (a fresh run starts near -3).
 # 3. playback eval (no trainer; runs until stopped): timeout 120 "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended \
 #      -Stage=SpikeA -Arenas=16 -Infer -ResumeFrom=<run1 snapshots> -abslog=$RUN/eval.log
@@ -147,6 +151,8 @@ The trainer saves the config it received to `$RUN/trainer/FPSAgent0/Configs/FPSA
   - The episode cap of 360 steps lives on the game side. Check `SpikeA: ready. ... maxEpisodeSteps=360` in `game_0.log`.
   - The network sizes (policy 1×128 ELU + GRU memory 64; critic 1×128 ELU) are Learning Agents defaults. They arrive as initial weights, not as settings.
 - **The game's side of the handshake:** `game_<i>.log` has `SpikeA: trainer settings: iterations=150 snapshotEvery=10 device=GPU tensorboard=1 seed=<seed>`.
+  - From the C-004 fix build on, the line also shows batches: `iterations=960 (= 30.0 batches of 32) snapshotEvery=10 ...`.
+  - `IterationNum` is still in gradient iterations (`-Batches=30` gives 960).
 
 Print the config (`python -I` keeps the run folder off the import path):
 
@@ -218,6 +224,26 @@ SpikeA: exiting (code 0): trainer finished
    - A harmless warning: `sh: xdg-user-dir: command not found`.
 5. **A CLUSTER script issue, already noted:** in playback mode the script's summary lines after `timeout` didn't print. The job ends together with the game. The numbers above come from each run's `eval.log`. This will be fixed in the script before Spike B.
 
+## LOCAL fixes after the cluster result (2026-11-12)
+- **C-004, root cause.** The bug was in our game code, not the engine.
+  - Each training step, Learning Agents runs `GatherCompletions()` **before** `GatherRewards()` (`ULearningAgentsPPOTrainer::RunTraining`, UE 5.7.4).
+  - Our completion check read a `bReached` flag that only the reward function updated, so it was always one step behind:
+    - **The reaching step:** the completion check saw the old flag and said "running"; then the reward paid +5.
+    - **The next step:** the completion check saw the flag and said "terminated"; the agent was still inside the radius, so the reward paid +5 again.
+  - Playback was unaffected because our own loop scores first and checks afterwards. That's why only the training curves were offset.
+- **C-004, the fix.**
+  - Completion is now a pure check of the current distance (`FPSReach::FReachEpisode::IsTerminal`).
+  - The bonus is paid at most once per episode (`FReachEpisode::Score`).
+  - Both training and playback use the same bookkeeping.
+  - Regression tests `FPSAgent.Learning.Reach.EpisodeOrder` / `BonusOnce` replay both call orders.
+  - **Expected now:** training `avgReturn` / `Avg Rew Sum` match playback (about +10 at the end), and episodes end one step earlier.
+  - **Design rule for every later task (D-022):** episode end must be computed from the current state, never from a flag set while computing the reward.
+- **C-005.** `-Batches=N` sets the run length in experience batches (N × 32 gradient iterations), and the game logs both numbers.
+  - The snapshot interval stays at 10 gradient iterations. The trainer saves only when `iteration % IterationsPerSnapshot == 0`.
+  - So an interval of a whole number of batches would leave the last snapshot up to that many batches old.
+  - With 10, it is at most 9 iterations old.
+- **C-003.** The procedure above calls la-train's python by full path and points to `spikeA.sbatch`.
+
 ## Follow-ups
-- STATUS.md: L-004 (run this spike).
+- STATUS.md: L-004 (run this spike), done. L-005: confirm the C-004 fix on the new build (`docs/builds.md`).
 - Spike C (fixed step): Learning Agents' `BeginTraining` already sets a fixed 60 Hz timestep, uncapped FPS and max physics step = fixed step. Headless `-Infer` sets the same.

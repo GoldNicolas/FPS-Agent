@@ -17,10 +17,17 @@ struct FPSAGENT_API FFPSRunArgs
 	bool bScripted = false;
 	/** -ResumeFrom=<dir>: load policy/critic/encoder/decoder.bin from this directory before starting. */
 	FString ResumeFrom;
-	/** -Iterations=N: the trainer stops after N iterations (0 = use settings). */
+	/**
+	 * -Iterations=N: the trainer stops after N GRADIENT iterations (0 = use settings). The trainer runs
+	 * IterationsPerGather (32) of them per experience batch, so -Iterations=150 is only about 5 batches (C-005).
+	 */
 	int32 Iterations = 0;
+	/** -Batches=N: the trainer stops after N experience batches (= N x IterationsPerGather gradient iterations). Wins over -Iterations. */
+	int32 Batches = 0;
 
 	bool IsSpikeA() const { return Stage.Equals(TEXT("SpikeA"), ESearchCase::IgnoreCase); }
+	/** Gradient iterations to request from the trainer: -Batches, else -Iterations, else SettingsIterations. */
+	int32 GradientIterations(int32 IterationsPerGather, int32 SettingsIterations) const;
 
 	static FFPSRunArgs Parse(const TCHAR* CommandLine);
 	/** Parsed from FCommandLine::Get() on first use. */

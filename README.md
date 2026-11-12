@@ -578,7 +578,8 @@ Ours are parsed in `Common/FPSRunArgs` and logged at startup (`ArenaGameMode: ..
 | `-Infer` | Play the policy back, no trainer (mean actions). Headless it uses the same fixed 60 Hz step as training. |
 | `-Scripted` | (implies `-Infer`) Agents walk straight to the target: the task's upper bound and an environment check. |
 | `-ResumeFrom=<dir>` | Load `encoder/policy/decoder.bin` (+ `critic.bin` when training) from `<dir>` before starting. A missing file exits with code 2. |
-| `-Iterations=N` | Trainer stops after N iterations; the games then exit with code 0. Default: `SpikeA.MaxIterations` in settings. |
+| `-Batches=N` | **Preferred run length.** The trainer stops after N experience batches; the games then exit with code 0. One batch = one round of experience from the games, then `IterationsPerGather` (32) gradient iterations, so this sets `IterationNum = N × 32`. Wins over `-Iterations`. |
+| `-Iterations=N` | The same, counted in **gradient iterations** (32 per batch, C-005): `-Iterations=150` is under 5 batches. Default when neither is given: `SpikeA.MaxIterations` in settings. |
 
 Engine flags we rely on: `-nullrhi -nosound -unattended`, `-LearningAgentsUseExternalTrainingProcess` (implied: the game never spawns a trainer itself), `-LearningAgentsIpAddress=` / `-LearningAgentsHostname=`, `-LearningAgentsPort=`, `-LearningAgentsTimeout=`, `-abslog=`.
 
@@ -590,6 +591,8 @@ Engine flags we rely on: `-nullrhi -nosound -unattended`, `-LearningAgentsUseExt
 - `SpikeA: exiting (code N): ...`
 
 **Resume semantics:** weights only. The game loads the snapshots before connecting; the trainer starts from those weights with a fresh optimizer and iteration counter.
+
+**Snapshot timing:** the trainer writes the four `.bin` files after every gradient iteration whose number is a multiple of `IterationsPerSnapshot` (10), so several times per batch. The last snapshot of a run is at most 9 gradient iterations older than the final weights. The files are small (about 0.5 MB in total), so the rewrites cost nothing.
 
 **Kinds of parallelism:**
 1. **Within a job:** N game processes × K arenas = N·K agents feeding one PPO trainer. This makes each run faster in wall-clock time. Epic tested 512 game processes against one trainer.
