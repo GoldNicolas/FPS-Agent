@@ -166,6 +166,7 @@ Record mismatches in *Cluster result*. A different value in either table means t
 
 - Script: [`cluster/slurm/spikeA.sbatch`](../../cluster/slurm/spikeA.sbatch). The trainer ran on the GPU with the `la-train` env ([Spike E](E-python-gpu.md)).
 - Run folders: `~/beanRant/runs/spikeA-20261111-<jobid>/` on Cradle (D-021).
+- **Run 1b's final snapshots** (the ones behind the +10.25 playback) are published as Release [`run-spikeA-20261111-151705`](https://github.com/GoldNicolas/FPS-Agent/releases/tag/run-spikeA-20261111-151705) (2026-11-12). Run report and how to play them back: [`runs/spikeA-20261111-151705.md`](../runs/spikeA-20261111-151705.md).
 
 | Step | Job | Setup | Result |
 |---|---|---|---|

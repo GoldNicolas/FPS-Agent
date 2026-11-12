@@ -464,7 +464,7 @@ Note: the older page at `utrgv.edu/hpcc` (55 nodes, 4 GB RAM each) is out of dat
 |---|---|---|---|
 | 1 | VPN + SSH login (you); clone the repo to `~/beanRant/FPS-Agent`; start Claude Code there | Cradle login node | The CLUSTER session takes over from here. The LOCAL session never connects to Cradle. Everything on Cradle stays under `~/beanRant/` (D-021, `docs/cradle.md` → *Our paths*). |
 | 2 | Recon (below), plus questions for the admins | Cradle login node | Record the answers in `docs/cradle.md` |
-| 3 | `la-train` env from `cluster/env/la-train.yml` into `~/beanRant/envs/la-train` (it includes `gh`), then `gh auth login` | Login node (has internet) | conda-forge only. Pick the PyTorch CUDA build after seeing `nvidia-smi` in a GPU job |
+| 3 | `la-train` env from `cluster/env/la-train.yml` into `~/beanRant/envs/la-train` (it includes `gh`), then `gh auth login` | Login node (has internet) | conda-forge only. Pick the PyTorch CUDA build after seeing `nvidia-smi` in a GPU job. `gh` is not on `PATH`: call `~/beanRant/envs/la-train/bin/gh`. `git push` borrows its login (`docs/cradle.md` → *`git` over HTTPS*) |
 | 4 | Spike E: GPU job runs `torch.cuda.is_available()` | Compute node | Confirms the driver and PyTorch work together |
 | 5 | Copy the Learning Agents + NNE Python files from UE 5.7.4 into `cluster/learning_agents_python/` and commit | LOCAL → git → CLUSTER | Pinned to the engine version. Cradle has no UE install, so these must come through the repo. |
 | 6 | Install the Linux target platform (Epic Launcher) and the v26 toolchain; set `LINUX_MULTIARCH_ROOT` | Windows | Needed to package for Linux |

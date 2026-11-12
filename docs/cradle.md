@@ -2,7 +2,7 @@
 
 **Owner: CLUSTER side.** Fill in every `TBD` from real command output, never from guesses. The LOCAL side and the job scripts rely on these values.
 
-_Last verified: 2026-11-11 by CLUSTER (login001 + GPU job 151692 on gpu001)_
+_Last verified: 2026-11-11 by CLUSTER (login001 + GPU job 151692 on gpu001); `gh` and `git` push rows 2026-11-12_
 
 ## Known from public docs (hpc.utrgv.edu, Nov 2026)
 - 12 GPU nodes, Slurm, Rocky Linux 8.6, InfiniBand 200 Gb/s, WekaIO storage.
@@ -64,7 +64,8 @@ Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
 | Node-to-node TCP on arbitrary ports (for multi-node) | TBD: untested (Spike D) |
 | Apptainer available? | No `apptainer`; `/usr/bin/singularity` exists (not required) |
 | Environment modules | Yes (`module avail`): `cuda/11.6`, `cuda/12.3`, `gcc/11.2.1`, `gcc/13.1.1`, OpenMPI, Intel oneAPI. We don't need them; our env brings its own CUDA runtime. |
-| `gh` CLI | **Not installed** on login001. `git` reaches GitHub over HTTPS (`origin` = `https://github.com/GoldNicolas/FPS-Agent.git`). |
+| `gh` CLI | Not installed system-wide. We use **`~/beanRant/envs/la-train/bin/gh`** (2.103.3 from conda-forge). It is not on `PATH`, so call it by full path. Logged in as `GoldNicolas` with a fine-grained token for this repo only, which gh stores in `~/.config/gh/`. That's enough for `gh release list`, `download` and `create`. |
+| `git` over HTTPS | `origin` = `https://github.com/GoldNicolas/FPS-Agent.git`. **No credential helper is configured** (`~/.gitconfig` unchanged on purpose), so plain `git fetch`/`push` stops at a username prompt. CLUSTER sessions lend git the `gh` login for one command only, without writing any config: `git -c credential.helper= -c "credential.helper=!$HOME/beanRant/envs/la-train/bin/gh auth git-credential" push origin main`. Same for `fetch` / `pull --rebase`. Verified with a fetch and push on 2026-11-12. |
 | Conda | Existing `~/miniconda3` (conda 25.7.0, default channel `defaults`); no Miniforge |
 
 ## Our paths on Cradle (D-021)
@@ -86,7 +87,7 @@ Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
 | Run outputs | `~/beanRant/runs/<run-id>/` (run ID per `docs/runs/README.md`) | created by the first job |
 | Slurm output | `~/beanRant/logs/%x-%j.out` | created before the first `sbatch` (Slurm doesn't create it) |
 | Conda env `la-train` | `~/beanRant/envs/la-train`, created as a **prefix env** with the existing `~/miniconda3`: `conda env create -p ~/beanRant/envs/la-train -f cluster/env/la-train.yml`. Set `CONDA_PKGS_DIRS=~/beanRant/envs/.pkgs` while creating it so the downloaded packages also stay in `beanRant/` (delete that cache afterwards with `conda clean`). | L-003 |
-| `gh` login | `~/.config/gh/` (the only file outside `beanRant/`, written by `gh auth login`) | after L-003 |
+| `gh` login | `~/.config/gh/` (the only file outside `beanRant/`, written by `gh auth login`) | done 2026-11-11 (fine-grained token, this repo only) |
 
 - **Use the env in scripts by full path:** `~/beanRant/envs/la-train/bin/python`, with `export PATH=~/beanRant/envs/la-train/bin:$PATH`. `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train` is **not enough** on this account (see the shell trap below; Spike E job 151697).
 - **conda-forge only:** the yml lists `channels: [conda-forge, nodefaults]`, because this account's conda config defaults to `defaults`.

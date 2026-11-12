@@ -2,7 +2,7 @@
 
 The mailbox between the **LOCAL** side (Windows: game, builds) and the **CLUSTER** side (Cradle: training). Both sides read this first after `git pull`, and update it before every push. Protocol: see `CLAUDE.md` → *Two roles, one repo*.
 
-_Last updated: 2026-11-11 by CLUSTER_
+_Last updated: 2026-11-12 by CLUSTER_
 
 ## Current focus
 - **LOCAL:** Plans 1 + 2 **done**.
@@ -20,7 +20,8 @@ _Last updated: 2026-11-11 by CLUSTER_
   - L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit).
   - L-003 **done**: Spike E **PASS** ([`spikes/E-python-gpu.md`](spikes/E-python-gpu.md)). The `la-train` env (torch 2.5.1 CUDA 12.6) computes correctly on the A100.
   - L-004 **done**: Spike A **PASS** on `build-cccd809` ([spike doc → *Cluster result*](spikes/A-learning-agents-linux.md)). Training, snapshots, resume and playback all work headless on Cradle, and the trainer config matches the expected values. Two requests for LOCAL: C-004 (training-time returns about 5 too high) and C-005 (`-Iterations` counts gradient steps).
-  - Next: Spikes C, B, D (README → *Prep checklist* step 8). Spike B also tries `--batch-size` = number of games.
+  - **Snapshots to watch (2026-11-12):** run 1b's final policy is published as prerelease [`run-spikeA-20261111-151705`](https://github.com/GoldNicolas/FPS-Agent/releases/tag/run-spikeA-20261111-151705): 4 `.bin` files + `SHA256SUMS`, checked after download. To play it back, use a game built from `cccd809` with `-Stage=SpikeA -Infer -ResumeFrom=<folder>`. Report: [`runs/spikeA-20261111-151705.md`](runs/spikeA-20261111-151705.md).
+  - Next, **paused until the user says go:** Spikes C, B, D (README → *Prep checklist* step 8). Spike B also tries `--batch-size` = number of games. First, fix the missing playback summary in `spikeA.sbatch` (spike doc, finding 5).
   - Paths (D-021): everything on Cradle lives under `~/beanRant/`; see cradle.md → *Our paths*.
 
 ## Latest build
@@ -48,7 +49,7 @@ _Last updated: 2026-11-11 by CLUSTER_
 |---|---|---|---|---|---|
 | `spikeA-20261111-151703` | `build-cccd809` | SpikeA smoke (`-Iterations=10`) | 151703 | done, pass | [spike A → *Cluster result*](spikes/A-learning-agents-linux.md) |
 | `spikeA-20261111-151704` | `build-cccd809` | SpikeA run 1 (`-Iterations=150`, 5 batches) | 151704 | done, −3.2 → +6.9 | same |
-| `spikeA-20261111-151705` | `build-cccd809` | SpikeA run 1b (`-Iterations=4800`, 150 batches) | 151705 | done, −3.0 → +14.9 (C-004 offset) | same |
+| `spikeA-20261111-151705` | `build-cccd809` | SpikeA run 1b (`-Iterations=4800`, 150 batches) | 151705 | done, −3.0 → +14.9 (C-004 offset); playback +10.25, 100% reached | [run report](runs/spikeA-20261111-151705.md) · Release [`run-spikeA-20261111-151705`](https://github.com/GoldNicolas/FPS-Agent/releases/tag/run-spikeA-20261111-151705) |
 | `spikeA-20261111-151707` | `build-cccd809` | SpikeA resume from 151705 (`-Iterations=30`) | 151707 | done, starts at +15.3 | same |
 | `spikeA-20261111-151708`…`151710` | `build-cccd809` | SpikeA playback: trained / scripted / untrained | 151708–151710 | done: 100% / 100% / 0% reached | same |
 
