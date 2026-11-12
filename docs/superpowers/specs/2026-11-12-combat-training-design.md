@@ -126,8 +126,62 @@ The same layout is used in every stage. Everything is in the agent's view frame 
   - The 5.7 trainer clips negative advantages to 0 (research §1), so every good behaviour has a positive term and the penalties stay small.
 - **Metrics, not rewards** (logged per stats window and in `-Eval`): accuracy, headshot %, time to clear, kills and deaths, damage per life, shots per kill, first-sighting time, and each reward term's share of the return.
 
-## 4. Scripted bots (not agreed yet)
-To cover: the behaviours (static, strafe, peek, crouch, patrol, explore, investigate, hunt, shoot), paths on the tile graph, fair senses, aim and reaction model, and difficulty parameters.
+## 4. Scripted bots (agreed 2026-11-12)
+- One `AScriptedBot` (an `ABeanCharacter`). Its behaviour, senses and skill come from a per-bot `FBotProfile`, sampled per episode from the stage and difficulty ranges (§5).
+- Each bot has its own RNG, seeded from the episode seed plus the bot index (determinism rule).
+
+**Navigation**
+- **Every arena is an `FMapSpec`.** S0/S1 range floors are generated specs: an open floor of N×M tiles, plus cover tiles in S1. So there is one code path for building and for pathing.
+- `TileGraph` builds the walkable graph once per map, using the same rules as `tools/mapgen`: ramps connect levels, and drops are one-way.
+- A* gives tile paths. Bots walk tile centres, plus a small seeded offset, so routes vary.
+- No Unreal navmesh: this works headless, stays deterministic and is cheap.
+
+**Behaviours** (per-bot mix from the stage and difficulty ranges)
+
+| Behaviour | Description |
+|---|---|
+| Static | Stands still (standing or crouched). |
+| Strafe | ADAD on a random period (the existing `StrafeLogic`). |
+| Peek | Steps out from cover and back on a random schedule. |
+| Crouch | Crouch-spams. |
+| Patrol | A loop through waypoints (zone tiles: sites, mid, plus random walkable tiles), with short pauses. |
+| Explore | Goes to tiles not visited recently, weighted toward named zones: "walk around hoping to find something". |
+| Investigate | Goes to the last seen or heard agent position, looks around for a few seconds, then returns to its base behaviour. |
+| Hunt | Explore + Investigate + briefly holds an angle at corners. S3. |
+
+**Senses (fair; the same rules as the agent, D-024)**
+- **Sight:** a 103° view cone, line of sight to the agent's head or chest, checked about 15 times per second (staggered across bots).
+- **Reaction delay:** the bot acts on a new sighting only after it. While it waits, nothing happens.
+- **Memory:** the last-seen position is kept for about 3 s.
+- **Hearing:**
+  - gunshots within about 40 m;
+  - **running** footsteps within about 15 m;
+  - walking and crouching are silent.
+  - A heard event gives a position with seeded noise and starts Investigate.
+- **Per arena only:** senses consider only the bot's own arena's agent, enforced by arena id, not by distance (hard rule 3).
+
+**Shooting** (S2 onward)
+- After the reaction delay, the bot turns toward the agent at its **tracking speed**.
+- It fires **bursts** (a length range) with an **aim error** (degrees, seeded).
+- If its profile says so, it stops moving before shooting (counter-strafe).
+- It uses the same rifle rules and damage table as the agent.
+
+**Difficulty knobs (`FBotProfile`)**
+- behaviour mix;
+- movement speed;
+- reaction time;
+- aim error;
+- tracking speed;
+- burst length;
+- whether it stops to shoot;
+- health;
+- hearing radius;
+- strafe and peek frequency.
+
+**Life cycle:**
+- In training, a dead bot stays dead until the episode ends.
+- The play-test range keeps `ARangeBot` with respawning.
+- Bots never damage each other.
 
 ## 5. Curriculum and episodes (not agreed yet)
 To cover:
