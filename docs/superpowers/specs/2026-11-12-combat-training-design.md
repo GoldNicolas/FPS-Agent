@@ -1,9 +1,7 @@
 # Combat training (S0–S3): design
 
-- **Status: draft, being agreed section by section with the user.**
-  - Agreed: the decisions below and §1 (2026-11-12).
-  - Not agreed yet: §2–§6. They are listed so the scope is visible, and they'll be filled in as they're agreed.
-  - Implementation starts only after the whole spec is reviewed.
+- **Status: all sections agreed with the user, one by one (2026-11-12). Waiting for the user's review of the whole document.**
+  - Implementation starts after that review, with the build A (S0) plan in `docs/superpowers/plans/`.
 - **Side:** LOCAL (game). CLUSTER runs the training.
 - **Research behind it:** [`docs/research/rl-reward-and-optimization.md`](../../research/rl-reward-and-optimization.md).
 - **Builds on:** README → *RL design* (observations, actions, reward table, curriculum) and → *Scripted bots*. Spike A ([`docs/spikes/A-learning-agents-linux.md`](../../spikes/A-learning-agents-linux.md)) proved the pipeline. D-022 sets the episode-end rule.
@@ -222,11 +220,63 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 - **S3 maps:** each arena gets one pool map for the life of the game process (picked by seed and arena index). Arenas and processes differ, and chained jobs re-seed. That avoids rebuilding geometry every episode.
 - **Isolation:** arena spacing ≥ the largest map plus 50 m. Senses and hearing are filtered by arena id anyway (hard rule 3).
 
-## 6. Training operations, testing, documentation, phasing (not agreed yet)
-To cover:
-- run lengths in batches, chained jobs and resume;
-- sweeps;
-- the cluster requests;
-- tests per module;
-- which docs change;
-- the build order S0 → S3.
+## 6. Training operations, testing, documentation, build order (agreed 2026-11-12)
+**New command-line arguments** (parsed in `FFPSRunArgs`, logged at startup, documented in README → *Game command-line arguments*):
+
+| Argument | Meaning |
+|---|---|
+| `-Stage=S0..S3` | The combat stage. `SpikeA` stays as it is. |
+| `-Batches=N` | Run length in experience batches (exists since `build-07eac52`). |
+| `-StartDifficulty=X` | Initial ramp level for every arena (0–1). Chained jobs pass the last logged mean level. |
+| `-Eval` | Promotion test: `-EvalEpisodes=N` (default 200) fixed-seed episodes spread over the arenas, at `-StartDifficulty`, with mean actions, no training and no ramp. Writes `-EvalJson=<path>` and exits 0. Needs `-ResumeFrom`, unless `-Scripted` (the reference score). |
+| `-StatsCsv=<path>` | Writes one CSV row per stats window: every reward term, every metric, and the ramp level (mean, min, max). |
+| `-Set=<path>=<value>;...` | Overrides any `UFPSAgentSettings` field via reflection, e.g. `-Set=Combat.Reward.Kill=1.5;Combat.Ppo.Discount=0.997`. Overrides are logged at startup; an unknown path exits with code 2. **PPO knobs live in settings too** (`Combat.Ppo`: discount, GAE λ, entropy weight, learning rates, network sizes), so sweeps need no new build. |
+| `-Scripted` | A reference agent instead of the policy, giving an environment check and a reference score per stage. S0: it turns toward the nearest visible enemy's head at the turn-rate cap and fires when the aim error is below the first-shot spread. S1–S3: it moves with the bots' Hunt logic. It uses the same senses as the policy (no extra information). |
+
+**Long runs and sweeps** (CLUSTER-owned scripts; LOCAL files requests in STATUS.md):
+- **Chained jobs:** a training job runs a fixed number of batches. The next job (`--dependency=afterany`) passes `-ResumeFrom=<previous snapshots>` and `-StartDifficulty=<last mean level>`.
+- **Sweeps:** job arrays over `-Set=` values. They're compared on `-Eval` results, never on training curves alone.
+- **Reporting:** each stage run gets a run report; a promoted snapshot is published as `run-<id>`.
+- **Before S0:** re-measure throughput (Spike B) on the combat build (bots plus traces cost more than Spike A).
+
+**Testing (test-first)**
+- **Pure modules, no world:**
+  - `TileGraph`: `map01` strongly connected; ramps both ways; drops one-way; A* paths valid and deterministic.
+  - Floor generator: connected, cover density honoured, deterministic per seed.
+  - `BotSenses`, with injected visibility: FOV edge; blocked line of sight; memory expiry; hearing radius; walking is silent; reaction delay.
+  - `RewardLedger`: each term; once-only clear bonus and first sighting; the aim helper's potential telescopes and is never negative; completion-before-reward call order (D-022).
+  - `DifficultyController`: up/down steps; window reset; review episodes excluded.
+  - `EpisodeSampler`: deterministic; the ranges hold at L = 0 and L = 1; spawn out of sight.
+  - `FFPSRunArgs`: the new arguments; `-Set` parsing and errors.
+- **World tests** (headless automation):
+  - rays ignore pawns;
+  - the enemy set excludes a bot behind a wall or outside the FOV;
+  - a bot walks a path on `map01`;
+  - a shooting bot damages the agent;
+  - an arena resets cleanly.
+- **Before every build:** a headless `-Scripted` run per available stage, with real numbers in `docs/builds.md`.
+
+**Documentation (before and after every step):**
+- This spec is updated whenever a decision changes.
+- README → *RL design*, *Scripted bots* and *Game command-line arguments*, plus the stats log line formats.
+- `decisions.md` entries.
+- Per build: a `docs/builds.md` row with what to test, and a STATUS.md request.
+- Each build's implementation plan goes in `docs/superpowers/plans/` before coding starts.
+
+**Arena generation for S1 and S2:**
+- One C++ floor generator produces an `FMapSpec` from rows, cols, cover density and the low/high cover ratio, using the arena seed.
+- It is validated by `TileGraph` connectivity and regenerated if invalid.
+- S1 uses large floors with sparse cover; S2 uses small floors with dense cover.
+
+**Edge cases:**
+- **Agent dies on the same decision the last bot dies:** it counts as a death. Kill and damage rewards are still paid; there is no clear bonus.
+- **No visible enemy:** the aim helper potential is 0. The enemy set and the hearing set may be empty (S0 always has empty hearing and no hit indicator).
+
+**Build order** (each build is trainable on the cluster when it ships, and each has its own implementation plan):
+
+| Build | Contents | CLUSTER then |
+|---|---|---|
+| **A → S0** | Shared training-session helper (from Spike A); `Combat` / `Bots` / `Curriculum` settings; generated open floors; `CombatTaskActor`; the full §2 layout (hearing and hit indicator included, empty in S0); `RewardLedger` (all §3 terms); `DifficultyController` + `EpisodeSampler` (S0 knobs); `AScriptedBot` Static; `-Scripted`, `-Eval`, `-Set`, `-StatsCsv`, `-StartDifficulty`; tests | Smoke test, Spike B on the combat build, S0 training to promotion |
+| **B → S1** | `TileGraph` + A*; floor generator with cover; Strafe / Peek / Crouch / Patrol / Explore / Investigate; footsteps and hearing | S1 from the S0 snapshot |
+| **C → S2** | Bot shooting (reaction, tracking, aim error, bursts, counter-strafe); small dense arenas; damage taken | S2 |
+| **D → S3** | Hunt; one pool map per arena; S3 ranges | S3. The deathmatch evaluation gets its own spec later. |
