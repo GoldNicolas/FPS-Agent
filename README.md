@@ -388,7 +388,7 @@ Two Claude Code sessions (and you) work in parallel: **LOCAL** on Windows (game,
 | Node.js ≥ 22.12 | Installed (22.19), for `unreal-mcp-cli` |
 | `unreal-mcp-cli` | Installed globally with `npm install -g unreal-mcp-cli` (0.30.0) |
 | v26 cross-compile toolchain (`v26_clang-20.1.8-rockylinux8`, the only version `Engine/Config/Linux/Linux_SDK.json` accepts) | Installed in `C:\UnrealToolchains\v26_clang-20.1.8-rockylinux8\` (3.2 GB). Epic-signed NSIS installer from the CDN link in *Cluster*, run with `/S` as admin. It sets the **machine** env var `LINUX_MULTIARCH_ROOT`; restart VS Code/terminals afterwards. Verified: `clang++ --version` → 20.1.8, and the sysroot glibc is **2.28** (= Cradle). |
-| Linux target platform (Epic Launcher → Library → UE 5.7 ▾ → Options → Target Platforms → Linux) | Pending (needs the launcher GUI). Once installed, `Engine\Binaries\Linux` and `Engine\Intermediate\Build\Linux` exist. Needed only for cluster builds (Phase 3 / Spike A). |
+| Linux target platform (Epic Launcher → Library → UE 5.7 ▾ → Options → Target Platforms → Linux) | Installed (about 13 GB of disk). It adds `Engine\Binaries\Linux` and the precompiled `Engine\Intermediate\Build\Linux\x64\UnrealGame\{Development,DebugGame,Shipping}` libraries. Check: `RunUAT.bat Turnkey -command=VerifySdk -platform=Linux -UpdateIfNeeded=false` → `Linux: (Status=Valid, Current_Sdk=v26_clang-20.1.8-rockylinux8)`. |
 
 ### Unreal-MCP (local mode)
 - **Plugin:** `Game/FPSAgent/Plugins/UnrealMCP` (0.30.0). The Windows bridge sidecar comes bundled, so no .NET SDK is needed.

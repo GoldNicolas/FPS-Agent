@@ -9,7 +9,8 @@ _Last updated: 2026-11-11 by LOCAL_
   - Sandbox: beans, rifle, health/armor, range + bots.
   - Maps: original `map01` with elevation, plus a 50-map validated pool, all built at runtime from JSON. Choose with `-Map=range|map01|gen_007|pool`.
   - Tests: 27 C++ (headless) + 18 Python; verified in PIE via MCP.
-  - Next: Linux target + v26 toolchain + Learning Agents Python copy, then the Spike A toy build.
+  - Linux cross-compile ready: v26 toolchain + Linux target platform installed, Turnkey `VerifySdk` → Valid.
+  - Next: copy the Learning Agents Python trainer, then the Spike A toy build (first `build-<sha>` release).
 - **CLUSTER:** Recon (L-001) and Spike E (L-003). Nothing to run from LOCAL yet: no Linux build has been published.
 
 ## Latest build
