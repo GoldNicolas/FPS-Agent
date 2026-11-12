@@ -2,7 +2,7 @@
 
 **Owner: CLUSTER side.** Fill in every `TBD` from real command output, never from guesses. The LOCAL side and the job scripts rely on these values.
 
-_Last verified: TBD (date + by whom)_
+_Last verified: 2026-11-11 by CLUSTER (login001 + GPU job 151692 on gpu001)_
 
 ## Known from public docs (hpc.utrgv.edu, Nov 2026)
 - 12 GPU nodes, Slurm, Rocky Linux 8.6, InfiniBand 200 Gb/s, WekaIO storage.
@@ -32,23 +32,56 @@ which apptainer singularity 2>/dev/null
 # In a GPU job:  srun -p <partition> --gres=gpu:1 -t 5 nvidia-smi
 ```
 
+## Partitions (measured: `sinfo`, `scontrol show partition`, 2026-11-11)
+Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
+
+| Partition | Nodes | GPUs/node | Cores/node | MaxTime | Who may use it | Notes |
+|---|---|---|---|---|---|---|
+| `gpuq` | gpu[001-008] | 8× A100 80GB PCIe | 56 | unlimited | groups astro, admins, **milab** | PriorityTier 1000. Mostly idle on 2026-11-11 (gpu004 drained). **Our default.** |
+| `sxmq` | sxm[001-004] | 8 (A100 SXM per public docs) | 56 | unlimited | groups admins, **milab**, csdev | PriorityTier 1000. Busy (56 running, 67 pending on 2026-11-11). |
+| `kimq` (default) | sxm[003-004] | 8 | 56 | 12:00:00 | all | PriorityTier 1, so it waits behind `sxmq` on the same nodes. `DefCpuPerGPU=6`. |
+| `gpua30q` | gpu[009-010] | 6 (A30) | 56 | 1-12:00:00 | all | Both nodes drained on 2026-11-11. |
+| `gpul40q` | gpu[011-012] | 8 (L40S) | 64 | unlimited | all | gpu012 drained on 2026-11-11. |
+
+- Slurm 21.08.8, `select/cons_tres` with **`CR_CORE`**: cores and GPUs are scheduled, **memory is not** (every node reports `RealMemory=1024000` MB, more than the public 640 GB for the A100 nodes). Still pass `--mem` in our scripts as documentation of what a job needs.
+- `DefMemPerNode=UNLIMITED`, `DefaultTime=NONE`: always pass `-t` and `--mem`.
+- **No accounting:** `AccountingStorageType=accounting_storage/none`. `sacct`, `sacctmgr` and `sshare` return nothing, so there are no QOS or per-user limits, and fair-share isn't tracked. Use `squeue` and the job's own logs instead of `sacct`.
+- `PreemptType=preempt/none`, `MaxArraySize=1001`, `KillWait=30 s`.
+- GRES has no type names (`gpu:8`), so pick the GPU type by partition, not by `--gres=gpu:a100:1`.
+
 ## Answers
 | Item | Value |
 |---|---|
-| Partition(s) I can use | TBD |
-| Max time limit per partition | TBD |
-| Max nodes / GPUs per job and per user | TBD |
-| Whole-node (`--exclusive`) allowed? | TBD |
-| GPU driver version / max CUDA (`nvidia-smi`) | TBD |
-| glibc | TBD |
-| Home path and quota | TBD |
-| Weka path for run outputs and quota | TBD (planned: `<weka>/fps-agent/runs/`) |
-| Outbound internet on login node / compute nodes | TBD / TBD |
-| Node-to-node TCP on arbitrary ports (for multi-node) | TBD |
-| Apptainer available? | TBD (not required) |
+| Partition(s) I can use | `gpuq` (default for us), `sxmq`, `kimq`, `gpua30q`, `gpul40q` (table above) |
+| Max time limit per partition | `gpuq` / `sxmq` / `gpul40q` unlimited; `gpua30q` 1 d 12 h; `kimq` 12 h |
+| Max nodes / GPUs per job and per user | No Slurm limit (`MaxNodes=UNLIMITED`, no QOS because accounting is off). Etiquette limit is an admin question. |
+| Whole-node (`--exclusive`) allowed? | Slurm doesn't block it (`ExclusiveUser=NO`, `OverSubscribe=NO`). Whether it's acceptable is still an admin question. |
+| GPU driver version / max CUDA (`nvidia-smi`) | **550.54.14 / CUDA 12.4** on gpu001 (`gpuq`, A100 80GB PCIe). Other partitions not checked yet. |
+| glibc | 2.28 (Rocky Linux 8.6, kernel 4.18.0-372.9.1), login and compute nodes |
+| Home path and quota | `/home/<user>` on NFS `riogrande:/home` (110 TB, 36 TB free). `quota -s` reports nothing usable. |
+| Weka path for run outputs and quota | `/weka/scratch` (wekafs, 80 TB, 44 TB free), visible on compute nodes. No per-user directory; `/weka/scratch/milab` exists (group `milab`, setgid, group-writable). Our runs folder there is **not created yet** (see *Our paths*). Quota and purge policy unknown. |
+| Outbound internet on login node / compute nodes | yes / yes (HTTPS to github.com and conda.anaconda.org from login001 and gpu001) |
+| Node-to-node TCP on arbitrary ports (for multi-node) | TBD: untested (Spike D) |
+| Apptainer available? | No `apptainer`; `/usr/bin/singularity` exists (not required) |
+| Environment modules | Yes (`module avail`): `cuda/11.6`, `cuda/12.3`, `gcc/11.2.1`, `gcc/13.1.1`, OpenMPI, Intel oneAPI. We don't need them; our env brings its own CUDA runtime. |
+| `gh` CLI | **Not installed** on login001. `git` reaches GitHub over HTTPS (`origin` = `https://github.com/GoldNicolas/FPS-Agent.git`). |
+| Conda | Existing `~/miniconda3` (conda 25.7.0, default channel `defaults`); no Miniforge |
+
+## Our paths on Cradle
+The user keeps this project under `~/beanRant/`. These replace the `~/fps-agent/...` paths in README and the spike sketches.
+
+| What | Path | State |
+|---|---|---|
+| Repo | `~/beanRant/FPS-Agent` | cloned |
+| Builds | `~/beanRant/builds/<sha>/` | not created yet |
+| Run outputs | **pending user decision:** `/weka/scratch/milab/<user>/fps-agent/runs/<run-id>/` or `~/beanRant/runs/<run-id>/` | not created yet |
+| Conda env `la-train` | `~/miniconda3/envs/la-train`, **conda-forge only** (`channels: [conda-forge, nodefaults]` in the yml, since the base config uses `defaults`) | L-003 |
+
+**Shell trap on this account:** login shells start with `VIRTUAL_ENV` and the front of `PATH` pointing at another project's env (`~/miniconda3/envs/locomujoco`). Job scripts must activate `la-train` explicitly (`source ~/miniconda3/bin/activate la-train`), and pip installs need `VIRTUAL_ENV=$CONDA_PREFIX` first.
 
 ## Questions for the admins (still open)
-- [ ] Max walltime and fair-share policy for our partition
-- [ ] Are whole-node jobs acceptable?
-- [ ] Can compute nodes reach each other on arbitrary TCP ports?
-- [ ] Recommended Weka path and quota for ~10–100 GB of run outputs
+- [ ] Max walltime is unlimited on `gpuq`. Is there a soft policy on job length or on how many GPUs and nodes one user may hold?
+- [ ] Are whole-node (`--exclusive`) jobs acceptable on `gpuq`?
+- [ ] Can compute nodes reach each other on arbitrary TCP ports? (We can also test this in Spike D.)
+- [ ] Is `/weka/scratch/milab/<user>/` the right place for ~10–100 GB of run outputs? What are the quota and purge policy for `/weka/scratch`?
+- [ ] What is the home (`/home`) quota? `quota -s` doesn't report it.

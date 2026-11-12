@@ -2,7 +2,7 @@
 
 The mailbox between the **LOCAL** side (Windows: game, builds) and the **CLUSTER** side (Cradle: training). Both sides read this first after `git pull`, and update it before every push. Protocol: see `CLAUDE.md` → *Two roles, one repo*.
 
-_Last updated: 2026-11-11 by LOCAL_
+_Last updated: 2026-11-11 by CLUSTER_
 
 ## Current focus
 - **LOCAL:** Plans 1 + 2 **done**.
@@ -15,7 +15,7 @@ _Last updated: 2026-11-11 by LOCAL_
     - trainer Python pinned in `cluster/learning_agents_python/`;
     - 31 C++ tests pass.
   - Next: the real S0 Learning Agents environment (ray-cast/line-of-sight observations, aim/move/shoot, rewards vs scripted bots).
-- **CLUSTER:** L-001 recon → L-003 env (add `smart_open`) → **L-004 Spike A run**.
+- **CLUSTER:** L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit). Next: L-003 env (add `smart_open`, plus `gh` from conda-forge) → **L-004 Spike A run**. Repo here is `~/beanRant/FPS-Agent`, not `~/fps-agent/repo` (cradle.md → *Our paths*).
 
 ## Latest build
 **`build-cccd809`** (2026-11-11): first Linux build, Spike A. Details and what to test: [`builds.md`](builds.md). Procedure: [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md).
@@ -23,8 +23,8 @@ _Last updated: 2026-11-11 by LOCAL_
 ## Requests: LOCAL → CLUSTER
 | ID | Date | Request | Status | Answer / link |
 |---|---|---|---|---|
-| L-001 | 2026-11-11 | Recon: run the commands in [`cradle.md`](cradle.md), fill in every `TBD`, and list which questions for the admins are still open | open | |
-| L-002 | 2026-11-11 | Bootstrap tools: Miniforge in `$HOME` (conda-forge only), install `gh`, run `gh auth login`, clone this repo to `~/fps-agent/repo`. Confirm that `gh release list` works | done | Not needed: the cluster already has GitHub access (user, 2026-11-11). Still confirm `gh release list` works before the first build lands. |
+| L-001 | 2026-11-11 | Recon: run the commands in [`cradle.md`](cradle.md), fill in every `TBD`, and list which questions for the admins are still open | done | 2026-11-11: all TBDs filled except node-to-node TCP (Spike D). Use `gpuq` (milab group). No Slurm accounting, so no `sacct`. 5 admin questions open, listed in [`cradle.md`](cradle.md). |
+| L-002 | 2026-11-11 | Bootstrap tools: Miniforge in `$HOME` (conda-forge only), install `gh`, run `gh auth login`, clone this repo to `~/fps-agent/repo`. Confirm that `gh release list` works | done | Not needed: the cluster already has GitHub access (user, 2026-11-11). Still confirm `gh release list` works before the first build lands. **2026-11-11 (CLUSTER): `gh` is not installed on Cradle**. It will be installed from conda-forge into `la-train` (L-003), then the user runs `gh auth login`. |
 | L-003 | 2026-11-11 | Spike E: write `cluster/env/la-train.yml` (Python 3.11, numpy, PyTorch CUDA build matching the driver, tensorboard), create the env, and check `torch.cuda.is_available()` in a GPU job. Report in `spikes/E-python-gpu.md` | open (after L-001) | |
 | L-004 | 2026-11-11 | **Spike A run** with `build-cccd809`, following [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md) → *Suggested CLUSTER procedure*: (1) a smoke test; (2) a ~150-iteration toy training run (2 games × 16 arenas); (3) a resume test with `-ResumeFrom`; (4) `-Infer` playback of the snapshots. **The `la-train` env also needs `smart_open`**: the trainer imports it at load (the engine pins 7.3.0). **Start the trainer first and never probe its port** (see the spike doc). Fill in *Cluster result* in the spike doc. If it fails, add a `C-xxx` request with the game/trainer log excerpt. | open (after L-001, L-003) | |
 

@@ -451,8 +451,8 @@ Two Claude Code sessions (and you) work in parallel: **LOCAL** on Windows (game,
 - Rocky Linux 8.6, Slurm, 200 Gb/s InfiniBand, WekaIO parallel storage.
 - Login: `ssh <user>@login.cradle.utrgv.edu`, **over the UTRGV VPN**.
 - Access: request through UTRGV IT with a faculty supervisor. You already have it.
-- The sample job script uses `-p kimq` and `--gres=gpu:1`. The real partition names and time limits are not published.
-- No module system or containers are documented. **We don't need containers**: the packaged Linux game is self-contained and runs straight from disk.
+- The sample job script uses `-p kimq` and `--gres=gpu:1`. The measured partitions, limits, driver and paths are in [`docs/cradle.md`](docs/cradle.md) (recon 2026-11-11). We use `gpuq`.
+- Environment modules and Singularity exist, but **we don't need them**: the packaged Linux game is self-contained and runs straight from disk, and the trainer runs from its own conda env.
 - It is a small, shared cluster. Be considerate: whole-node jobs are expensive for other users, so check fair-share policy with the admins.
 
 Note: the older page at `utrgv.edu/hpcc` (55 nodes, 4 GB RAM each) is out of date.
