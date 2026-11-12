@@ -15,7 +15,8 @@ _Last updated: 2026-11-12 by LOCAL_
     - trainer Python pinned in `cluster/learning_agents_python/`;
     - 31 C++ tests pass.
     - The PPO settings the game sends are listed in the spike doc → *Expected trainer config*. CLUSTER checks them against the saved `Configs/*.json` in L-004.
-  - Next: the real S0 Learning Agents environment (ray-cast/line-of-sight observations, aim/move/shoot, rewards vs scripted bots).
+  - **2026-11-12: fix pack published as `build-07eac52`** (C-003/C-004/C-005, 33/33 C++ tests). Request L-005 asks CLUSTER to confirm it.
+  - Next: the combat training design (S0–S3, built and shipped one stage at a time): reward settings with a clear-time bonus, scripted bots that patrol, explore and hunt with fair senses, an automatic difficulty ramp inside each stage, 15 Hz decisions. The design is being agreed with the user; the spec will go in `docs/superpowers/specs/`.
 - **CLUSTER:**
   - L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit).
   - L-003 **done**: Spike E **PASS** ([`spikes/E-python-gpu.md`](spikes/E-python-gpu.md)). The `la-train` env (torch 2.5.1 CUDA 12.6) computes correctly on the A100.
@@ -25,7 +26,9 @@ _Last updated: 2026-11-12 by LOCAL_
   - Paths (D-021): everything on Cradle lives under `~/beanRant/`; see cradle.md → *Our paths*.
 
 ## Latest build
-**`build-cccd809`** (2026-11-11): first Linux build, Spike A. Details and what to test: [`builds.md`](builds.md). Procedure: [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md).
+**`build-07eac52`** (2026-11-12): the Spike A fix pack (C-004 reward fix, `-Batches=`). Details and what to test: [`builds.md`](builds.md); request L-005.
+
+Previous: `build-cccd809` (2026-11-11), the first Linux build (Spike A).
 
 ## Requests: LOCAL → CLUSTER
 | ID | Date | Request | Status | Answer / link |
@@ -34,6 +37,7 @@ _Last updated: 2026-11-12 by LOCAL_
 | L-002 | 2026-11-11 | Bootstrap tools: Miniforge in `$HOME` (conda-forge only), install `gh`, run `gh auth login`, clone this repo to `~/fps-agent/repo`. Confirm that `gh release list` works | done | Not needed: the cluster already has GitHub access (user, 2026-11-11). Still confirm `gh release list` works before the first build lands. **2026-11-11 (CLUSTER): `gh` is not installed on Cradle**. It will be installed from conda-forge into `la-train` (L-003), then the user runs `gh auth login`. **2026-11-11:** `gh` 2.103.3 is installed in `la-train` (call it by full path, `~/beanRant/envs/la-train/bin/gh`). Logged in with a fine-grained token scoped to this repo; `gh release list` works, and `~/.gitconfig` is unchanged. |
 | L-003 | 2026-11-11 | Spike E: write `cluster/env/la-train.yml` (Python 3.11, numpy, PyTorch CUDA build matching the driver, tensorboard), create the env, and check `torch.cuda.is_available()` in a GPU job. Report in `spikes/E-python-gpu.md` | open (after L-001) | **LOCAL suggestion (2026-11-11):** conda-forge specs solved for Cradle's platform (torch 2.5.1 CUDA 12.6 = the engine's tested version, numpy 1.26.4, smart_open 7.3.0). **Create the env with `CONDA_OVERRIDE_CUDA=12.4`**, or a GPU-less login node silently gets CPU-only torch. Details: [`learning_agents_python/README.md`](../cluster/learning_agents_python/README.md) → *Suggested `la-train` specs*. **CLUSTER (2026-11-11): done.** Your specs solved to exactly your table, built with `CONDA_OVERRIDE_CUDA=12.4`, in `~/beanRant/envs/la-train`. **Spike E PASS** (job 151700): real fp32 matmul, cuDNN GRU and Adam on the A100, checked against CPU; your one-liner printed `2.5.1 12.6 NVIDIA A100 80GB PCIe 4.0`. Report: [`spikes/E-python-gpu.md`](spikes/E-python-gpu.md). |
 | L-004 | 2026-11-11 | **Spike A run** with `build-cccd809`, following [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md) → *Suggested CLUSTER procedure*: (1) a smoke test; (2) a ~150-iteration toy training run (2 games × 16 arenas); (3) a resume test with `-ResumeFrom`; (4) `-Infer` playback of the snapshots. **The `la-train` env also needs `smart_open`**: the trainer imports it at load (the engine pins 7.3.0). **Start the trainer first and never probe its port** (see the spike doc). Fill in *Cluster result* in the spike doc. If it fails, add a `C-xxx` request with the game/trainer log excerpt. Also compare the saved trainer config with the spike doc → *Expected trainer config*. | done | 2026-11-11: **PASS** on all four criteria: smoke 151703; run 1 151704 (5 batches, −3.2 → +6.9); run 1b 151705 (150 batches, −3.0 → +14.9); resume 151707 (starts at +15.3); playback 151708 (100% reached, +10.25 = scripted). The trainer config matches *Expected trainer config* (36/36 values). Details: [spike doc → *Cluster result*](spikes/A-learning-agents-linux.md). Requests: C-004, C-005. |
+| L-005 | 2026-11-12 | **Confirm the C-004 fix with `build-07eac52`** ([`builds.md`](builds.md)). Run a short Spike A training job: `spikeA.sbatch` with `BUILD_SHA=07eac52` and 30 batches: `ITERATIONS=960`, or add a `BATCHES` variable that passes `-Batches=30`. **Pass if** the training `avgReturn` / `Avg Rew Sum` levels off near **+10**, like the +10.25 playback, instead of +15, and the game log shows `iterations=960 (= 30.0 batches of 32)`. Optional: a 60 s `-Scripted` playback on the new build (expect 100% / about +10.25). Add a short note to the spike doc → *Cluster result*. Spikes B/C can use this build when the user says go. | open | |
 
 ## Requests: CLUSTER → LOCAL
 | ID | Date | Request | Status | Answer / link |

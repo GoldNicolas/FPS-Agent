@@ -62,7 +62,7 @@ So, judged by the trainer's `Avg Rew Sum` line or the game's `avgReturn`, a lear
 ## Suggested CLUSTER procedure
 This is a sketch. The CLUSTER side owns the real script, [`cluster/slurm/spikeA.sbatch`](../../cluster/slurm/spikeA.sbatch), and that's the one to run.
 
-`-Batches=` needs the C-004 fix build or newer (`docs/builds.md`). With `build-cccd809`, use `-Iterations=` with batches × 32 (C-005).
+`-Batches=` needs `build-07eac52` or newer. With `build-cccd809`, use `-Iterations=` with batches × 32 (C-005).
 
 ```bash
 # Paths per D-021 / docs/cradle.md -> "Our paths": everything under ~/beanRant
@@ -151,7 +151,7 @@ The trainer saves the config it received to `$RUN/trainer/FPSAgent0/Configs/FPSA
   - The episode cap of 360 steps lives on the game side. Check `SpikeA: ready. ... maxEpisodeSteps=360` in `game_0.log`.
   - The network sizes (policy 1×128 ELU + GRU memory 64; critic 1×128 ELU) are Learning Agents defaults. They arrive as initial weights, not as settings.
 - **The game's side of the handshake:** `game_<i>.log` has `SpikeA: trainer settings: iterations=150 snapshotEvery=10 device=GPU tensorboard=1 seed=<seed>`.
-  - From the C-004 fix build on, the line also shows batches: `iterations=960 (= 30.0 batches of 32) snapshotEvery=10 ...`.
+  - From `build-07eac52` on, the line also shows batches: `iterations=960 (= 30.0 batches of 32) snapshotEvery=10 ...`.
   - `IterationNum` is still in gradient iterations (`-Batches=30` gives 960).
 
 Print the config (`python -I` keeps the run folder off the import path):
@@ -224,7 +224,7 @@ SpikeA: exiting (code 0): trainer finished
    - A harmless warning: `sh: xdg-user-dir: command not found`.
 5. **A CLUSTER script issue, already noted:** in playback mode the script's summary lines after `timeout` didn't print. The job ends together with the game. The numbers above come from each run's `eval.log`. This will be fixed in the script before Spike B.
 
-## LOCAL fixes after the cluster result (2026-11-12)
+## LOCAL fixes after the cluster result (2026-11-12, `build-07eac52`)
 - **C-004, root cause.** The bug was in our game code, not the engine.
   - Each training step, Learning Agents runs `GatherCompletions()` **before** `GatherRewards()` (`ULearningAgentsPPOTrainer::RunTraining`, UE 5.7.4).
   - Our completion check read a `bReached` flag that only the reward function updated, so it was always one step behind:
@@ -245,5 +245,5 @@ SpikeA: exiting (code 0): trainer finished
 - **C-003.** The procedure above calls la-train's python by full path and points to `spikeA.sbatch`.
 
 ## Follow-ups
-- STATUS.md: L-004 (run this spike), done. L-005: confirm the C-004 fix on the new build (`docs/builds.md`).
+- STATUS.md: L-004 (run this spike), done. L-005: confirm the C-004 fix on `build-07eac52`.
 - Spike C (fixed step): Learning Agents' `BeginTraining` already sets a fixed 60 Hz timestep, uncapped FPS and max physics step = fixed step. Headless `-Infer` sets the same.
