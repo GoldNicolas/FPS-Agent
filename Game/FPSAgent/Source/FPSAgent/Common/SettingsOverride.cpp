@@ -10,7 +10,33 @@ namespace
 		{
 			return false;
 		}
-		if (!FCString::IsNumeric(*T))
+		// Strict: [+-] (digits [. digits*] | . digits) ([eE] [+-] digits)?  with nothing trailing.
+		int32 i = 0;
+		const int32 N = T.Len();
+		if (T[i] == TEXT('+') || T[i] == TEXT('-')) { ++i; }
+		int32 Digits = 0;
+		while (i < N && FChar::IsDigit(T[i])) { ++i; ++Digits; }
+		if (i < N && T[i] == TEXT('.'))
+		{
+			++i;
+			while (i < N && FChar::IsDigit(T[i])) { ++i; ++Digits; }
+		}
+		if (Digits == 0)
+		{
+			return false;
+		}
+		if (i < N && (T[i] == TEXT('e') || T[i] == TEXT('E')))
+		{
+			++i;
+			if (i < N && (T[i] == TEXT('+') || T[i] == TEXT('-'))) { ++i; }
+			int32 ExpDigits = 0;
+			while (i < N && FChar::IsDigit(T[i])) { ++i; ++ExpDigits; }
+			if (ExpDigits == 0)
+			{
+				return false;
+			}
+		}
+		if (i != N)
 		{
 			return false;
 		}

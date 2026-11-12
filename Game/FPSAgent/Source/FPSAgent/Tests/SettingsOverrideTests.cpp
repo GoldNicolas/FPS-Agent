@@ -38,6 +38,19 @@ bool FFPSSettingsOverrideTest::RunTest(const FString& Parameters)
 	Fails(TEXT("Combat.Ppo.bTrainOnGpu=maybe"), TEXT("not a bool"));
 	Fails(TEXT("Combat.Reward.Kill"), TEXT("Path=Value"));
 
+	Fails(TEXT("Combat.Reward.Kill=."), TEXT("not a number"));
+	Fails(TEXT("Combat.Reward.Kill=-"), TEXT("not a number"));
+	Fails(TEXT("Combat.Reward.Kill=1e"), TEXT("not a number"));
+
+	{
+		TArray<FString> A;
+		FString E;
+		TestTrue(TEXT("exponent applies"), FPSSettingsOverride::Apply(*S, TEXT("Combat.Ppo.LearningRatePolicy=3e-4"), A, E));
+		TestTrue(TEXT("3e-4 value"), FMath::IsNearlyEqual(S->Combat.Ppo.LearningRatePolicy, 0.0003f, 1e-9f));
+		TestTrue(TEXT("1E+2 applies"), FPSSettingsOverride::Apply(*S, TEXT("Combat.Reward.Kill=1E+2"), A, E));
+		TestEqual(TEXT("1E+2 value"), S->Combat.Reward.Kill, 100.0f);
+	}
+
 	TArray<FString> None;
 	TestTrue(TEXT("empty spec is fine"), FPSSettingsOverride::Apply(*S, TEXT(""), None, Error));
 	TestEqual(TEXT("nothing applied"), None.Num(), 0);
