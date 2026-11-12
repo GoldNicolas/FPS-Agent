@@ -183,13 +183,44 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 - The play-test range keeps `ARangeBot` with respawning.
 - Bots never damage each other.
 
-## 5. Curriculum and episodes (not agreed yet)
-To cover:
-- per-stage arena, bot and difficulty ranges;
-- the automatic ramp controller;
-- mixing in easier episodes to avoid forgetting;
-- episode end conditions and time limits;
-- promotion gates on `-Eval`.
+## 5. Curriculum and episodes (agreed 2026-11-12)
+**Stage ladder.**
+- Each stage is a separate run, starting from the previous stage's promoted snapshot.
+- Every knob has an *easy* value (difficulty 0) and a *hard* value (difficulty 1) in a per-stage `FStageSpec` (settings).
+- At level L, the sampler draws around `lerp(easy, hard, L)` with a ±10% jitter of the range.
+
+| Stage | Arena | Bots (easy → hard) | Bots shoot | Time limit | Aim helper W |
+|---|---|---|---|---|---|
+| **S0 Aim gallery** (agent can't move) | Generated open floor | 1 → 5 **static** (standing → some crouched); 5–15 m → 5–35 m; within ±45° of the agent's facing → all around | no | 20 s | 0.2 |
+| **S1 Movers** | Generated open floor, cover density 0 → medium | 1 → 5; strafe / peek / crouch → + patrol / explore; speed 60% → 100% | no | 30 s | 0.2 |
+| **S2 Duels** | Small generated cover arenas | 1 → 4; reaction 600 → 200 ms; aim error 6° → 1.5°; tracking 90 → 360 °/s | yes | 45 s | 0.1 |
+| **S3 Hunt** | The 50-map pool (`pool.json`) | 2 → 5; patrol / explore / investigate / **hunt**; S2's hard skill values | yes | 90 s | 0 |
+
+**Automatic ramp** (`DifficultyController`, per arena)
+- **Level:** L ∈ [0, 1], starting at `-StartDifficulty=` (default 0), so chained jobs continue where they stopped.
+- **Rolling window:** the last 20 counted episodes.
+  - Clear rate > 70% → L += 0.05.
+  - Clear rate < 40% → L −= 0.05.
+  - The window resets after each change.
+  - **Clear** = all bots dead with the agent alive. A timeout or a death is not a clear.
+- **Review episodes (anti-forgetting):** 20% of episodes are sampled at a uniform random level in [0, L]. They are excluded from the window.
+- **Logging:** the mean, min and max L across arenas, in every stats line and the CSV.
+
+**Promotion**
+- **Trigger:** the mean L stays ≥ 0.9 over the last 10 stats windows. The run report says so.
+- **Gate:** CLUSTER runs `-Eval -Stage=Sn -StartDifficulty=1`: 200 fixed-seed episodes, no training, mean actions.
+- **Pass:** clear rate ≥ 70% (a per-stage setting). The snapshot is then published as `run-<id>` and the next stage starts from it at L = 0.
+
+**Episodes**
+- **Spawning:**
+  - The agent spawns facing a random direction.
+  - S1 and later: on a tile that no bot can see at spawn time (tile-grid line-of-sight check).
+  - S0: the agent stands at the arena centre with the bots placed around it.
+- **Endings:** death or all bots dead → Termination; time limit → Truncation (§3).
+  - `MaxEpisodeStepNum` = time limit × 15.
+- **Independence:** each arena resets on its own.
+- **S3 maps:** each arena gets one pool map for the life of the game process (picked by seed and arena index). Arenas and processes differ, and chained jobs re-seed. That avoids rebuilding geometry every episode.
+- **Isolation:** arena spacing ≥ the largest map plus 50 m. Senses and hearing are filtered by arena id anyway (hard rule 3).
 
 ## 6. Training operations, testing, documentation, phasing (not agreed yet)
 To cover:
