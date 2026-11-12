@@ -150,7 +150,16 @@ void ACombatTaskActor::BeginPlay()
 			Ppo.MemorySize, Ppo.TicksPerDecision);
 	}
 
-	for (int32 i = 0; i < Arenas.Num(); ++i) { StartNextEpisode(i); }
+	ArenaIdle.Init(false, Arenas.Num());
+	if (bEval)
+	{
+		// Fixed per-arena quotas (arena i gets N/K, plus 1 for the first N%K): every started episode is counted.
+		const int32 N = Args.EvalEpisodes;
+		const int32 K = Arenas.Num();
+		EvalStartsLeft.SetNum(K);
+		for (int32 i = 0; i < K; ++i) { EvalStartsLeft[i] = N / K + (i < N % K ? 1 : 0); }
+	}
+	for (int32 i = 0; i < Arenas.Num(); ++i) { TryStartNextEpisode(i); }
 	bReady = true;
 	NextDecisionTime = Now();
 	NextStatsTime = Now() + S.Combat.Ppo.StatsLogIntervalSeconds;
@@ -175,6 +184,21 @@ void ACombatTaskActor::StartNextEpisode(int32 ArenaIndex)
 	const FPSCurriculum::FS0Episode Config = FPSCurriculum::SampleS0(Rng, Difficulty[ArenaIndex].Level, /*bAllowReview=*/!bEval,
 		UFPSAgentSettings::Get().Curriculum, Arena->GetBotRadiusCm());
 	Arena->StartEpisode(Config, Seed, Now());
+}
+
+bool ACombatTaskActor::TryStartNextEpisode(int32 ArenaIndex)
+{
+	if (EvalStartsLeft.IsValidIndex(ArenaIndex))
+	{
+		if (EvalStartsLeft[ArenaIndex] <= 0)
+		{
+			ArenaIdle[ArenaIndex] = true;
+			return false;
+		}
+		--EvalStartsLeft[ArenaIndex];
+	}
+	StartNextEpisode(ArenaIndex);
+	return true;
 }
 
 void ACombatTaskActor::RecordEpisode(int32 ArenaIndex, ECombatEpisodeEnd End)
@@ -236,7 +260,7 @@ void ACombatTaskActor::ResetAgentEpisode(int32 AgentId)
 	}
 	if (!bExiting)
 	{
-		StartNextEpisode(Index);
+		TryStartNextEpisode(Index);
 	}
 }
 
@@ -267,18 +291,22 @@ void ACombatTaskActor::Decide()
 	// Playback / eval / scripted: the same order as training, run by us.
 	for (int32 i = 0; i < Arenas.Num(); ++i)
 	{
+		if (ArenaIdle[i]) { continue; }
 		Arenas[i]->TakeDecisionReward();
 		const ECombatEpisodeEnd End = Arenas[i]->GetEpisodeEnd(T);
 		if (End != ECombatEpisodeEnd::Running)
 		{
 			RecordEpisode(i, End);
 			if (bExiting) { return; }
-			StartNextEpisode(i);
+			TryStartNextEpisode(i);
 		}
 	}
 	if (bScripted)
 	{
-		for (UCombatArena* Arena : Arenas) { Arena->SetAction(Arena->ScriptedAction(static_cast<float>(DecisionSeconds))); }
+		for (int32 i = 0; i < Arenas.Num(); ++i)
+		{
+			if (!ArenaIdle[i]) { Arenas[i]->SetAction(Arenas[i]->ScriptedAction(static_cast<float>(DecisionSeconds))); }
+		}
 	}
 	else
 	{
@@ -300,7 +328,10 @@ void ACombatTaskActor::Tick(float DeltaSeconds)
 		Decide();
 		if (bExiting) { return; }
 	}
-	for (UCombatArena* Arena : Arenas) { Arena->TickAction(DeltaSeconds); }
+	for (int32 i = 0; i < Arenas.Num(); ++i)
+	{
+		if (!ArenaIdle[i]) { Arenas[i]->TickAction(DeltaSeconds); }
+	}
 	if (Now() >= NextStatsTime)
 	{
 		LogStats();
@@ -333,13 +364,18 @@ void ACombatTaskActor::LogStats()
 	const FString& Csv = FFPSRunArgs::Get().StatsCsv;
 	if (!Csv.IsEmpty())
 	{
-		if (!bCsvStarted)
+		bool bOk = true;
+		if (IFileManager::Get().FileSize(*Csv) <= 0)
 		{
-			FFileHelper::SaveStringToFile(FPSCombatStats::CsvHeader() + TEXT("\n"), *Csv);
-			bCsvStarted = true;
+			bOk = FFileHelper::SaveStringToFile(FPSCombatStats::CsvHeader() + TEXT("\n"), *Csv);
 		}
-		FFileHelper::SaveStringToFile(FPSCombatStats::CsvRow(Window, Now(), L, DecisionsPerSecond) + TEXT("\n"), *Csv,
+		bOk = bOk && FFileHelper::SaveStringToFile(FPSCombatStats::CsvRow(Window, Now(), L, DecisionsPerSecond) + TEXT("\n"), *Csv,
 			FFileHelper::EEncodingOptions::AutoDetect, &IFileManager::Get(), FILEWRITE_Append);
+		if (!bOk && !bCsvWarned)
+		{
+			bCsvWarned = true;
+			UE_LOG(LogFPSAgent, Warning, TEXT("Combat: could not write -StatsCsv '%s'"), *Csv);
+		}
 	}
 	Window.Reset();
 	WindowDecisions = 0;

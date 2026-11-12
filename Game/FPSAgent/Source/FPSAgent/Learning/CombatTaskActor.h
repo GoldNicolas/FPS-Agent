@@ -45,6 +45,8 @@ protected:
 private:
 	UCombatArena* ArenaOf(int32 AgentId) const;
 	void StartNextEpisode(int32 ArenaIndex);
+	/** Starts the arena's next episode unless its -Eval quota is used up (then the arena goes idle). */
+	bool TryStartNextEpisode(int32 ArenaIndex);
 	void RecordEpisode(int32 ArenaIndex, ECombatEpisodeEnd End);
 	void Decide();
 	void LogStats();
@@ -62,6 +64,10 @@ private:
 	TArray<FPSCurriculum::FDifficultyController> Difficulty;
 	FPSCombatStats::FWindow Window;
 	FPSCombatStats::FWindow EvalTotals;
+	/** -Eval: episodes each arena may still start. The quotas sum to -EvalEpisodes, so slow episodes are never dropped. Empty outside -Eval. */
+	TArray<int32> EvalStartsLeft;
+	/** Arena finished its -Eval quota: no more decisions, ticks or records. */
+	TArray<bool> ArenaIdle;
 	double DecisionSeconds = 4.0 / 60.0;
 	double NextDecisionTime = 0.0;
 	double NextStatsTime = 0.0;
@@ -72,5 +78,5 @@ private:
 	bool bEval = false;
 	bool bReady = false;
 	bool bExiting = false;
-	bool bCsvStarted = false;
+	bool bCsvWarned = false;
 };
