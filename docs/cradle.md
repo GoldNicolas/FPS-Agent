@@ -23,8 +23,8 @@ _Last verified: 2026-11-11 by CLUSTER (login001 + GPU job 151692 on gpu001)_
 ```bash
 sinfo -o "%P %l %D %c %m %G %N"       # partitions, time limit, nodes, cores, mem, GPUs
 scontrol show partition               # MaxTime, MaxNodes, QOS, AllowAccounts
-sacctmgr show assoc user=$USER format=account,partition,qos,maxjobs,maxsubmit
-sshare -U                             # fair-share
+sacctmgr show assoc user=$USER format=account,partition,qos,maxjobs,maxsubmit   # no output here: accounting is off
+sshare -U                             # fair-share (empty here, same reason)
 ldd --version | head -1               # glibc (expect 2.28)
 df -h ~ ; quota -s 2>/dev/null        # home quota
 mount | grep -i weka                  # Weka mount point(s)

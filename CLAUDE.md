@@ -103,7 +103,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 
 ## CLUSTER role (Cradle)
 
-- **Login-node etiquette:** only light work on the login node (git, editing, `sbatch`/`squeue`/`sacct`, conda installs, `gh`). **Never run training, game processes, or anything heavy there.** Everything runs through Slurm (`cluster/slurm/*.sbatch`, or `srun` for short tests).
+- **Login-node etiquette:** only light work on the login node (git, editing, `sbatch`/`squeue`, conda installs, `gh`). `sacct` doesn't work on Cradle (accounting is off); use `squeue` and the job logs. **Never run training, game processes, or anything heavy there.** Everything runs through Slurm (`cluster/slurm/*.sbatch`, or `srun` for short tests).
 - **You cannot build the game here** (no Unreal Engine on Cradle). Don't edit `Game/` or `tools/`. Choose arenas at runtime with `-Map=range|map01|gen_007|pool` (+ `-Seed=`). If the game needs a change, add a `C-xxx` request with the exact error or log excerpt.
 - **Get builds** with `gh release download build-<sha>` into `~/beanRant/builds/<sha>/`, and verify with `sha256sum -c SHA256SUMS` before use.
 - **Paths (D-021): everything stays under `~/beanRant/`.**

@@ -112,7 +112,7 @@ The agents ("beans with guns") learn by trial and error (PPO) **only against scr
 
 ## Repository layout
 
-Planned layout. So far the docs, `.mcp.json`, git config and the project scaffold exist. The scaffold is `Game/FPSAgent`: the `.uproject` and an empty `FPSAgent` module. `Plugins/UnrealMCP` is installed locally but not committed.
+Planned layout. Everything below exists except `Source/FPSAgent/Eval/` and `cluster/{env,slurm,sweeps,scripts}/` (not written yet). `Plugins/UnrealMCP` is installed locally but not committed.
 
 ```
 FPS-Agent/
@@ -150,8 +150,10 @@ FPS-Agent/
     ├── decisions.md           # append-only decision log
     ├── builds.md              # build log (LOCAL)
     ├── cradle.md              # cluster facts (CLUSTER)
+    ├── maps/                  # map preview PNGs (LOCAL)
     ├── spikes/                # spike reports
-    └── runs/                  # run reports (CLUSTER)
+    ├── runs/                  # run reports (CLUSTER)
+    └── superpowers/plans/     # implementation plans (LOCAL)
 ```
 
 Version control: a private GitHub repo with a single `main` branch. **Git LFS** handles `*.uasset` and `*.umap`. Builds and snapshots go to GitHub Releases, never git. See [Collaboration workflow](#collaboration-workflow-local--cluster-via-github).
@@ -166,7 +168,7 @@ Version control: a private GitHub repo with a single `main` branch. **Git LFS** 
 - Eye height and head position are fixed offsets on the capsule (crouch lowers both).
 
 ### Movement (Valorant-like)
-All values live in a DataAsset, never hard-coded. UE units are centimetres.
+All values live in `UFPSAgentSettings` (D-012), never hard-coded. UE units are centimetres.
 
 | Parameter | Starting value | Confidence |
 |---|---|---|
@@ -453,7 +455,7 @@ Two Claude Code sessions (and you) work in parallel: **LOCAL** on Windows (game,
 - Access: request through UTRGV IT with a faculty supervisor. You already have it.
 - The sample job script uses `-p kimq` and `--gres=gpu:1`. The measured partitions, limits, driver and paths are in [`docs/cradle.md`](docs/cradle.md) (recon 2026-11-11). We use `gpuq`.
 - Environment modules and Singularity exist, but **we don't need them**: the packaged Linux game is self-contained and runs straight from disk, and the trainer runs from its own conda env.
-- It is a small, shared cluster. Be considerate: whole-node jobs are expensive for other users, so check fair-share policy with the admins.
+- It is a small, shared cluster. Be considerate: whole-node jobs are expensive for other users. Slurm accounting and fair-share are off here, so etiquette is the only limit; check it with the admins.
 
 Note: the older page at `utrgv.edu/hpcc` (55 nodes, 4 GB RAM each) is out of date.
 
@@ -470,19 +472,14 @@ Note: the older page at `utrgv.edu/hpcc` (55 nodes, 4 GB RAM each) is out of dat
 | 8 | Spikes C, B, D: fixed timestep, throughput (N × K), multi-node | Cradle | Set the default job sizes |
 | 9 | Write the real `train_single_node`, `sweep_array`, `train_multi_node` and `eval` job scripts | Repo → Cradle | Built from the spike findings |
 
-**Questions for the Cradle admins:**
-- What is the maximum time limit for each partition?
-- Are whole-node (`--exclusive`) jobs allowed? What are the fair-share limits?
-- Can processes on different compute nodes connect to each other on arbitrary TCP ports?
-- Do compute nodes have outbound internet access?
-- What is the Weka path for run outputs, and what are the home and Weka quotas?
-- Is Apptainer available? (Not needed, but good to know.)
+**Questions for the Cradle admins:** the open ones are tracked in [`docs/cradle.md`](docs/cradle.md) → *Questions for the admins*. Recon (2026-11-11) already answered the time limits, outbound internet (yes, on login and compute nodes) and Apptainer (no; Singularity yes).
 
 ### One-time recon (run on the login node)
+Done on 2026-11-11 (L-001); the results are in `docs/cradle.md`. Rerun it if the cluster changes.
 ```bash
 sinfo -o "%P %l %D %c %m %G"          # partitions, time limits, nodes, cores, mem, GPUs
 scontrol show partition               # full limits (MaxTime, MaxNodes, QOS)
-sacctmgr show assoc user=$USER        # your account / QOS
+sacctmgr show assoc user=$USER        # your account / QOS (no output on Cradle: accounting is off)
 nvidia-smi                            # (inside a GPU job) driver + max CUDA version
 ldd --version                         # glibc (expect 2.28)
 df -h ~ ; ls /                        # home quota, find the Weka mount for run outputs
@@ -495,7 +492,7 @@ Note: Epic warns that glibc older than 2.35 makes the engine **start more slowly
 1. Use the existing `~/miniconda3`; no Miniforge is needed. Keep the package cache in `beanRant/` while creating the env: `export CONDA_PKGS_DIRS=~/beanRant/envs/.pkgs`.
 2. Create the environment as a prefix env, conda-forge only: `conda env create -p ~/beanRant/envs/la-train -f cluster/env/la-train.yml`. The yml pins Python 3.11, numpy, a PyTorch build that matches the driver's CUDA version (from `nvidia-smi`), `smart_open==7.3.0`, `tensorboard` and `gh`.
 3. Activate it with `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train`.
-4. Copy the trainer's Python files **from your UE 5.7 install** into `cluster/learning_agents_python/`, pinned to that engine version:
+4. (Done by LOCAL; see `cluster/learning_agents_python/README.md`.) Copy the trainer's Python files **from your UE 5.7 install** into `cluster/learning_agents_python/`, pinned to that engine version:
    - `Engine/Plugins/Experimental/LearningAgents/Content/Python/`
    - `Engine/Plugins/Experimental/NNERuntimeBasicCpu/Content/Python/`
 
@@ -527,23 +524,25 @@ These are the official Learning Agents scale-out flags from Epic's *Scaling Out 
 #!/bin/bash
 #SBATCH --job-name=fpsagent-S0
 #SBATCH -N 1
-#SBATCH -p <partition>              # from recon
+#SBATCH -p gpuq                     # docs/cradle.md
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=<cores>     # whole node if allowed
-#SBATCH --time=<= partition max>
+#SBATCH --mem=<GB>G                 # not enforced (CR_CORE), but documents the need
+#SBATCH --time=<hh:mm:ss>           # always set: gpuq has no time limit
 #SBATCH --signal=B:USR1@300         # warning before walltime, so we can stop cleanly
 #SBATCH --output=/home/%u/beanRant/logs/%x-%j.out   # #SBATCH lines don't expand ~
 set -euo pipefail
 
+REPO=~/beanRant/FPS-Agent
 BUILD=~/beanRant/builds/$BUILD_SHA/Linux
-RUN=~/beanRant/runs/$SLURM_JOB_ID
+RUN=~/beanRant/runs/$SLURM_JOB_ID; mkdir -p "$RUN"
 PORT=$((40000 + SLURM_JOB_ID % 20000))     # unique per job: no collisions
 NUM_GAMES=${NUM_GAMES:-16}                  # ~3 cores per game process (tune in Spike B)
 ARENAS=${ARENAS:-16}                        # arenas (= agents) per process (tune in Spike B)
 
 source ~/miniconda3/bin/activate ~/beanRant/envs/la-train
-python3 -u cluster/learning_agents_python/train.py FPSAgent -l \
-  --nne-cpu-path cluster/learning_agents_python/nne_runtime_basic_cpu \
+python3 -u $REPO/cluster/learning_agents_python/train.py FPSAgent -l \
+  --nne-cpu-path $REPO/cluster/learning_agents_python/nne_runtime_basic_cpu \
   Socket 127.0.0.1:$PORT "$RUN/trainer" > "$RUN/trainer.log" 2>&1 &
 # Wait for the listener. Never probe the port: a connect+close wedges the trainer.
 until grep -q "Server listening on" "$RUN/trainer.log"; do sleep 1; done
@@ -552,13 +551,13 @@ for i in $(seq 0 $((NUM_GAMES-1))); do
   "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended \
     -LearningAgentsUseExternalTrainingProcess \
     -LearningAgentsIpAddress=127.0.0.1 -LearningAgentsPort=$PORT \
-    -LearningAgentsTimeout=30 \
+    -LearningAgentsTimeout=120 \
     -Stage=S0 -Seed=$((SLURM_JOB_ID*1000+i)) -Arenas=$ARENAS \
     -abslog="$RUN/game_$i.log" &
 done
 wait
 ```
-`-Stage`, `-Seed` and `-Arenas` are our own command-line arguments, parsed in C++.
+`-Stage`, `-Seed` and `-Arenas` are our own command-line arguments, parsed in C++. The connect timeout is generous because engine startup is slow on glibc 2.28 (Spike A finding 7). `-Stage=S0` doesn't exist yet; today only `-Stage=SpikeA` trains.
 
 **Start order (important):**
 1. Start the trainer first. Launch the games only once its log shows `Server listening on <host>:<port>` (needs `-l`).
@@ -640,9 +639,9 @@ Human-likeness settings mapped to difficulty levels; the policy runs in a shippe
 ---
 
 ## Open questions and things to verify
-- Cradle partition names, maximum time limits, fair-share/QOS limits, and whether whole-node jobs are allowed.
-- Whether nodes can reach each other on arbitrary TCP ports (needed for multi-node training).
-- The Weka path for run outputs, and home directory quotas.
+- Cradle etiquette: how many GPUs and nodes one user may hold, and whether whole-node jobs are OK. Partitions and time limits are answered in `docs/cradle.md`.
+- Whether nodes can reach each other on arbitrary TCP ports (needed for multi-node training; Spike D).
+- The home directory quota (all run outputs live in home, D-021).
 - Every mechanic value marked **verify** above. Public numbers change with patches.
 - Learning Agents 5.7 class and API names compared with the 5.5 course; how the trainer resumes from a snapshot; how the trainer's settings (PPO hyperparameters) are passed in external-trainer mode.
 - Whether Unreal-MCP's beta works smoothly with 5.7 for level building (Spike F).

@@ -32,6 +32,7 @@ _Last updated: 2026-11-11 by CLUSTER_
 | ID | Date | Request | Status | Answer / link |
 |---|---|---|---|---|
 | C-001 | 2026-11-11 | Paths on Cradle changed (D-021: everything under `~/beanRant/`). Please update the two LOCAL-owned places that still use the old paths. (1) [`builds.md`](builds.md) → *Fetch (CLUSTER)*: change `~/fps-agent/builds/<sha>` to `~/beanRant/builds/<sha>`. (2) [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md) → *Suggested CLUSTER procedure*: use `REPO=~/beanRant/FPS-Agent`, `BUILD=~/beanRant/builds/<sha>/Linux`, `RUN=~/beanRant/runs/<run-id>` and `source ~/miniconda3/bin/activate ~/beanRant/envs/la-train`. Low priority: CLUSTER follows [`cradle.md`](cradle.md) → *Our paths* meanwhile. | open | |
+| C-002 | 2026-11-11 | Doc fix, low priority. [`spikes/A-learning-agents-linux.md`](spikes/A-learning-agents-linux.md) → *Tuning* and `cluster/learning_agents_python/README.md` say the Spike A values are in `DefaultGame.ini`. That file has no FPS Agent section; the values are the C++ defaults of `FReachTaskSettings` in `Common/FPSAgentTypes.h`, and `DefaultGame.ini` only holds overrides. Please say so, so CLUSTER knows where to read them. (The values match the spike doc: 3–12 m, 1 m radius, +1/m, −0.5/s, +5, 360 steps, snapshot every 10.) | open | |
 
 ## Runs
 | Run ID | Build | Stage | Slurm job | Status | Report |
