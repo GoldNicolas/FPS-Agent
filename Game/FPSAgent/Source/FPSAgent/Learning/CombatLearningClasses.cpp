@@ -119,11 +119,12 @@ void UCombatTrainingEnv::GatherAgentCompletion_Implementation(ELearningAgentsCom
 {
 	// Learning Agents asks for completions BEFORE rewards: this must be a pure function of state (D-022).
 	const ACombatTaskActor* Task = TaskOf(this);
+	// Every combat end is a termination: the time left is observed, so the time limit is part of the task (D-028), and the aim-helper potential is 0 at any end.
 	switch (Task ? Task->GetEpisodeEnd(AgentId) : ECombatEpisodeEnd::Running)
 	{
 	case ECombatEpisodeEnd::Died:
-	case ECombatEpisodeEnd::Cleared:  OutCompletion = ELearningAgentsCompletion::Termination; break;
-	case ECombatEpisodeEnd::TimedOut: OutCompletion = ELearningAgentsCompletion::Truncation; break;
+	case ECombatEpisodeEnd::Cleared:
+	case ECombatEpisodeEnd::TimedOut: OutCompletion = ELearningAgentsCompletion::Termination; break;
 	default:                          OutCompletion = ELearningAgentsCompletion::Running; break;
 	}
 }

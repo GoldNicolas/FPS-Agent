@@ -107,7 +107,7 @@ void UCombatArena::StartEpisode(const FPSCurriculum::FS0Episode& Config, int32 S
 	}
 	Agent->GetHealth()->ResetToFull();
 	Agent->GetRifle()->ResetWeapon();
-	Agent->GetRifle()->SeedRandom(Seed);
+	Agent->GetRifle()->SeedRandom(static_cast<int32>(HashCombineFast(static_cast<uint32>(Seed), 0x9E3779B9u) & 0x7fffffff)); // own stream, not the sampler's
 	Agent->SetDeadState(false);
 	Agent->UnCrouch();
 	Agent->SetWalking(false);
@@ -347,7 +347,7 @@ void UCombatArena::Sense(TArray<FPSPerception::FSighting>& Out) const
 		{
 			S.Head = Bot->GetHitbox(EHitZone::Head)->GetComponentLocation();
 			const FVector Chest = Bot->GetHitbox(EHitZone::Body)->GetComponentLocation();
-			S.bVisible = bAgentAlive && FPSPerception::InFieldOfView(Eye, View, S.Head, P.FieldOfViewDeg)
+			S.bVisible = bAgentAlive && FPSPerception::InFieldOfView(Eye, View, S.Head, P.FieldOfViewDeg, P.VerticalFieldOfViewDeg)
 				&& (FPSPerception::HasLineOfSight(World, Eye, S.Head) || FPSPerception::HasLineOfSight(World, Eye, Chest));
 			S.Velocity = Bot->GetVelocity();
 			const FVector ToAgent = (Agent->GetActorLocation() - Bot->GetActorLocation()).GetSafeNormal2D();

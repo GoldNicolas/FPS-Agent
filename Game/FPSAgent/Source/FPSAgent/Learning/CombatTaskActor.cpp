@@ -59,6 +59,11 @@ void ACombatTaskActor::BeginPlay()
 		Exit(2, FString::Printf(TEXT("stage S%d is not in this build (build A has S0 only)"), StageIndex));
 		return;
 	}
+	if (S.Combat.ArenaSpacingCm < 2.f * UCombatArena::FloorHalfSizeCm() + 5000.f)
+	{
+		Exit(2, FString::Printf(TEXT("arenas would interact: ArenaSpacingCm %.0f < floor %.0f + 50 m (hard rule 3)"), S.Combat.ArenaSpacingCm, 2.f * UCombatArena::FloorHalfSizeCm()));
+		return;
+	}
 	bScripted = Args.bScripted;
 	bEval = Args.bEval;
 	bInfer = Args.bInfer || GIsEditor; // no local training (hard rule 6): the editor only plays back
@@ -253,7 +258,7 @@ void ACombatTaskActor::ResetAgentEpisode(int32 AgentId)
 		return;
 	}
 	const ECombatEpisodeEnd End = Arenas[Index]->GetEpisodeEnd(Now());
-	// Running = a reset Learning Agents started itself (at the start of training, or its step cap): not a real episode end.
+	// Running = a reset Learning Agents started itself (at the start of training): not a real episode end. (Its step cap only clears its episode buffer and never calls this.)
 	if (End != ECombatEpisodeEnd::Running)
 	{
 		RecordEpisode(Index, End);
@@ -262,6 +267,11 @@ void ACombatTaskActor::ResetAgentEpisode(int32 AgentId)
 	{
 		TryStartNextEpisode(Index);
 	}
+}
+
+int32 ACombatTaskActor::AgentIdOf(int32 ArenaIndex) const
+{
+	return AgentToArena.IndexOfByKey(ArenaIndex);
 }
 
 void ACombatTaskActor::Decide()
@@ -289,6 +299,7 @@ void ACombatTaskActor::Decide()
 	}
 
 	// Playback / eval / scripted: the same order as training, run by us.
+	TArray<int32> RestartedAgents;
 	for (int32 i = 0; i < Arenas.Num(); ++i)
 	{
 		if (ArenaIdle[i]) { continue; }
@@ -298,7 +309,11 @@ void ACombatTaskActor::Decide()
 		{
 			RecordEpisode(i, End);
 			if (bExiting) { return; }
-			TryStartNextEpisode(i);
+			if (TryStartNextEpisode(i))
+			{
+				const int32 Id = AgentIdOf(i);
+				if (Id != INDEX_NONE) { RestartedAgents.Add(Id); }
+			}
 		}
 	}
 	if (bScripted)
@@ -310,6 +325,11 @@ void ACombatTaskActor::Decide()
 	}
 	else
 	{
+		// Playback runs its own episode loop, so it must reset the policy memory like training does (Manager->ResetAgents zeroes it). Training never calls this: there the trainer resets agents itself and calls ResetAgentEpisode.
+		if (RestartedAgents.Num() > 0)
+		{
+			Manager->ResetAgents(RestartedAgents);
+		}
 		Session->GetPolicy()->RunInference(0.f); // mean actions, no exploration noise
 	}
 }

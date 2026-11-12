@@ -15,6 +15,7 @@
 #include "HAL/PlatformMisc.h"
 #include "Learning/CombatTaskActor.h"
 #include "Learning/ReachTaskActor.h"
+#include "Learning/TrainingSession.h"
 
 static TAutoConsoleVariable<FString> CVarPlayMap(
 	TEXT("fps.PlayMap"), TEXT(""),
@@ -117,6 +118,11 @@ void AArenaGameMode::InitGame(const FString& MapName, const FString& Options, FS
 		{
 			FPlatformMisc::RequestExitWithStatus(false, 2);
 		}
+		return;
+	}
+	if (!FFPSRunArgs::Get().IsKnownStage())
+	{
+		UTrainingSession::ExitProcess(TEXT("ArenaGameMode"), 2, FString::Printf(TEXT("unknown -Stage=%s (known: SpikeA, SpikeC, S0..S3)"), *FFPSRunArgs::Get().Stage));
 		return;
 	}
 	const FFPSRunArgs& Args = FFPSRunArgs::Get();

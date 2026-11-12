@@ -44,6 +44,8 @@ struct FPSAGENT_API FFPSRunArgs
 	static int32 CombatStageIndexOf(const FString& InStage);
 	int32 CombatStageIndex() const { return CombatStageIndexOf(Stage); }
 	bool IsCombatStage() const { return CombatStageIndex() >= 0; }
+	/** Stage is empty, SpikeA, SpikeC or S0..S3 (any case). */
+	bool IsKnownStage() const;
 	/** Gradient iterations to request from the trainer: -Batches, else -Iterations, else SettingsIterations. */
 	int32 GradientIterations(int32 IterationsPerGather, int32 SettingsIterations) const;
 

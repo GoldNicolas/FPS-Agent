@@ -21,9 +21,10 @@ namespace FPSPerception
 		return FVector2D(FRotator::NormalizeAxis(To.Yaw - View.Yaw), FRotator::NormalizeAxis(To.Pitch - FRotator::NormalizeAxis(View.Pitch)));
 	}
 
-	bool InFieldOfView(const FVector& Eye, const FRotator& View, const FVector& Target, float FovDeg)
+	bool InFieldOfView(const FVector& Eye, const FRotator& View, const FVector& Target, float FovDeg, float VerticalFovDeg)
 	{
-		return FMath::Abs(AimErrorDeg(Eye, View, Target).X) <= 0.5 * FovDeg;
+		const FVector2D Err = AimErrorDeg(Eye, View, Target);
+		return FMath::Abs(Err.X) <= 0.5 * FovDeg && FMath::Abs(Err.Y) <= 0.5 * VerticalFovDeg;
 	}
 
 	FVector ToViewFrame(const FVector& WorldVector, float ViewYawDeg)

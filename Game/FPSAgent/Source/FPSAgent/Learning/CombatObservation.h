@@ -10,7 +10,7 @@
 namespace FPSCombatObs
 {
 	inline constexpr int32 SelfSize = 15;
-	inline constexpr int32 EnemySize = 13;
+	inline constexpr int32 EnemySize = 15;
 	inline constexpr int32 HitSize = 4;
 	inline constexpr int32 SoundSize = 5;
 
@@ -49,7 +49,7 @@ namespace FPSCombatObs
 		float SecondsSinceSeen = 0.f;
 	};
 	/** [head x,y,z / PositionScale, distance / PositionScale, aim yaw, pitch / 180, vel x,y,z / VelocityScale,
-	 *   facing, crouched, visible, min(age / MemorySeconds, 1)]. */
+	 *   facing, crouched, visible, min(age / MemorySeconds, 1), fine aim yaw, fine aim pitch (aim error / FineAimScaleDeg, clamped to [-1, 1])]. */
 	FPSAGENT_API TArray<float> PackEnemy(const FEnemyState& E, const FCombatPerceptionSettings& P);
 	/** [direction x,y,z (view frame, unit), min(age / HitIndicatorSeconds, 1)]. */
 	FPSAGENT_API TArray<float> PackHit(const FVector& DirectionView, float SecondsAgo, const FCombatPerceptionSettings& P);

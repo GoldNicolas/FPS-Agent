@@ -39,7 +39,9 @@ namespace FPSCombatObs
 			static_cast<float>(E.AimErrorDeg.X / AngleScaleDeg), static_cast<float>(E.AimErrorDeg.Y / AngleScaleDeg),
 			static_cast<float>(V.X), static_cast<float>(V.Y), static_cast<float>(V.Z),
 			E.bFacingAgent ? 1.f : 0.f, E.bCrouched ? 1.f : 0.f, E.bVisible ? 1.f : 0.f,
-			FMath::Clamp(Safe(E.SecondsSinceSeen, P.MemorySeconds), 0.f, 1.f) };
+			FMath::Clamp(Safe(E.SecondsSinceSeen, P.MemorySeconds), 0.f, 1.f),
+			FMath::Clamp(Safe(static_cast<float>(E.AimErrorDeg.X), P.FineAimScaleDeg), -1.f, 1.f),
+			FMath::Clamp(Safe(static_cast<float>(E.AimErrorDeg.Y), P.FineAimScaleDeg), -1.f, 1.f) };
 	}
 
 	TArray<float> PackHit(const FVector& DirectionView, float SecondsAgo, const FCombatPerceptionSettings& P)

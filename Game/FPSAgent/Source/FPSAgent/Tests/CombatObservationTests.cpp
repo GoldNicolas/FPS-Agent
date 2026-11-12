@@ -35,6 +35,13 @@ bool FFPSCombatObsPackTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("aim pitch"), Enemy[5], -0.25f, 1e-5f);
 	TestEqual(TEXT("visible"), Enemy[11], 1.f);
 	TestEqual(TEXT("age / memory"), Enemy[12], 0.5f, 1e-5f);
+	TestEqual(TEXT("fine aim yaw clamps"), Enemy[13], 1.f, 1e-5f);
+	TestEqual(TEXT("fine aim pitch clamps"), Enemy[14], -1.f, 1e-5f);
+	FEnemyState E2 = E;
+	E2.AimErrorDeg = FVector2D(2.5, -1.0);
+	const TArray<float> Enemy2 = PackEnemy(E2, P);
+	TestEqual(TEXT("fine aim yaw"), Enemy2[13], 0.5f, 1e-5f);
+	TestEqual(TEXT("fine aim pitch"), Enemy2[14], -0.2f, 1e-5f);
 
 	const TArray<float> Hit = PackHit(FVector(0.0, 1.0, 0.0), 0.5f, P);
 	TestEqual(TEXT("hit size"), Hit.Num(), HitSize);

@@ -47,6 +47,8 @@ private:
 	void StartNextEpisode(int32 ArenaIndex);
 	/** Starts the arena's next episode unless its -Eval quota is used up (then the arena goes idle). */
 	bool TryStartNextEpisode(int32 ArenaIndex);
+	/** Learning Agents agent id of the arena, or INDEX_NONE. */
+	int32 AgentIdOf(int32 ArenaIndex) const;
 	void RecordEpisode(int32 ArenaIndex, ECombatEpisodeEnd End);
 	void Decide();
 	void LogStats();

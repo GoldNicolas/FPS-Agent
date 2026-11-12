@@ -54,6 +54,11 @@ int32 FFPSRunArgs::CombatStageIndexOf(const FString& InStage)
 	return -1;
 }
 
+bool FFPSRunArgs::IsKnownStage() const
+{
+	return Stage.IsEmpty() || IsSpikeA() || IsSpikeC() || IsCombatStage();
+}
+
 FString FFPSRunArgs::ToString() const
 {
 	return FString::Printf(TEXT("Stage=%s Seed=%d Arenas=%d Map=%s Infer=%d Scripted=%d ResumeFrom=%s Iterations=%d Batches=%d StartDifficulty=%.2f Eval=%d EvalEpisodes=%d EvalJson=%s StatsCsv=%s Set=%s"),

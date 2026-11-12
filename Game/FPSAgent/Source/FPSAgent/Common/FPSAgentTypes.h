@@ -249,6 +249,10 @@ struct FCombatPerceptionSettings
 	GENERATED_BODY()
 	/** Horizontal field of view for the line-of-sight check (README: 103°, verify). */
 	UPROPERTY(EditAnywhere, Category="Perception") float FieldOfViewDeg = 103.f;
+	/** Vertical view angle: 103 deg horizontal at 16:9 = 70.53 deg vertical (2*atan(tan(51.5 deg) * 9/16)). */
+	UPROPERTY(EditAnywhere, Category="Perception") float VerticalFieldOfViewDeg = 70.53f;
+	/** Fine aim channels: aim error / FineAimScaleDeg, clamped to [-1, 1], so sub-degree errors are visible to the policy (no observation normalization in the trainer). */
+	UPROPERTY(EditAnywhere, Category="Perception") float FineAimScaleDeg = 5.f;
 	/** Enemies seen within this many seconds stay in the observation as "remembered" (spec §2). */
 	UPROPERTY(EditAnywhere, Category="Perception") float MemorySeconds = 2.f;
 	UPROPERTY(EditAnywhere, Category="Perception") int32 MaxEnemies = 5;

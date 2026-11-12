@@ -96,6 +96,11 @@ bool FFPSRunArgsTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("SpikeC probe stage"), FFPSRunArgs::Parse(TEXT("-Stage=spikec")).IsSpikeC());
 	TestFalse(TEXT("SpikeC is not combat"), FFPSRunArgs::Parse(TEXT("-Stage=SpikeC")).IsCombatStage());
 	TestFalse(TEXT("no stage: not the probe"), D.IsSpikeC());
+	TestTrue(TEXT("no stage is known"), D.IsKnownStage());
+	TestTrue(TEXT("S3 is known"), FFPSRunArgs::Parse(TEXT("-Stage=s3")).IsKnownStage());
+	TestTrue(TEXT("SpikeC is known"), FFPSRunArgs::Parse(TEXT("-Stage=SpikeC")).IsKnownStage());
+	TestFalse(TEXT("S4 is unknown"), FFPSRunArgs::Parse(TEXT("-Stage=S4")).IsKnownStage());
+	TestFalse(TEXT("SO (letter O) is unknown"), FFPSRunArgs::Parse(TEXT("-Stage=SO")).IsKnownStage());
 	return true;
 }
 

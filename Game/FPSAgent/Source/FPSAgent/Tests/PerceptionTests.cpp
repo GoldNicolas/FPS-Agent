@@ -24,6 +24,11 @@ bool FFPSPerceptionMathTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("51 deg is inside a 103 deg FOV"), InFieldOfView(Eye, FRotator::ZeroRotator, AtYaw(51.0), 103.f));
 	TestFalse(TEXT("52 deg is outside"), InFieldOfView(Eye, FRotator::ZeroRotator, AtYaw(52.0), 103.f));
 	TestFalse(TEXT("behind is outside"), InFieldOfView(Eye, FRotator::ZeroRotator, AtYaw(180.0), 103.f));
+	const FVector Up30(1000.0, 0.0, 1000.0 * FMath::Tan(FMath::DegreesToRadians(30.0)));
+	const FVector Up40(1000.0, 0.0, 1000.0 * FMath::Tan(FMath::DegreesToRadians(40.0)));
+	TestTrue(TEXT("30 deg up is inside a 70.53 deg vertical FOV"), InFieldOfView(Eye, FRotator::ZeroRotator, Up30, 103.f, 70.53f));
+	TestFalse(TEXT("40 deg up is outside"), InFieldOfView(Eye, FRotator::ZeroRotator, Up40, 103.f, 70.53f));
+	TestTrue(TEXT("looking up 40 deg sees it"), InFieldOfView(Eye, FRotator(40.0, 0.0, 0.0), Up40, 103.f, 70.53f));
 
 	const FVector V = ToViewFrame(FVector(0.0, 100.0, 5.0), 90.f);
 	TestTrue(TEXT("world +Y is forward when facing yaw 90"), V.Equals(FVector(100.0, 0.0, 5.0), 1e-3));

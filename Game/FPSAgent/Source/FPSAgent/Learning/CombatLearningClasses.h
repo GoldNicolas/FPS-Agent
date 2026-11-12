@@ -12,7 +12,7 @@
  * Observation "Combat" (struct):
  * - Self: continuous 15.
  * - Rays: continuous 72.
- * - Enemies: set of up to 5 x continuous 13.
+ * - Enemies: set of up to 5 x continuous 15.
  * - Hit: optional continuous 4.
  * - Sounds: set of up to 4 x continuous 5.
  *

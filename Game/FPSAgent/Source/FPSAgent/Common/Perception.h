@@ -13,8 +13,8 @@ namespace FPSPerception
 {
 	/** How far View must turn to look at Target: (yaw, pitch) in degrees, [-180, 180]; + = right / up. */
 	FPSAGENT_API FVector2D AimErrorDeg(const FVector& Eye, const FRotator& View, const FVector& Target);
-	/** Target inside the horizontal field of view (|yaw error| <= FovDeg / 2). */
-	FPSAGENT_API bool InFieldOfView(const FVector& Eye, const FRotator& View, const FVector& Target, float FovDeg);
+	/** Target inside the view cone (|yaw error| <= FovDeg / 2 and |pitch error| <= VerticalFovDeg / 2). */
+	FPSAGENT_API bool InFieldOfView(const FVector& Eye, const FRotator& View, const FVector& Target, float FovDeg, float VerticalFovDeg = 180.f);
 	/** A world vector in the yaw-only view frame: X forward, Y right, Z up. */
 	FPSAGENT_API FVector ToViewFrame(const FVector& WorldVector, float ViewYawDeg);
 	/** For each pitch, YawCount directions evenly around ViewYawDeg (the first one straight ahead). */
