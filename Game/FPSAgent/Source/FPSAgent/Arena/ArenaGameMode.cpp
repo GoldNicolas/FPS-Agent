@@ -7,6 +7,7 @@
 #include "Common/FPSAgentSettings.h"
 #include "Common/FPSRunArgs.h"
 #include "Common/SettingsOverride.h"
+#include "Eval/SpikeCProbe.h"
 #include "Engine/World.h"
 #include "FPSAgent.h"
 #include "GameFramework/PlayerStart.h"
@@ -82,6 +83,11 @@ FString AArenaGameMode::ResolveArenaName(const FString& Requested, const TArray<
 	return Requested;
 }
 
+bool AArenaGameMode::WantsSpikeC()
+{
+	return FFPSRunArgs::Get().IsSpikeC() || CVarStage.GetValueOnGameThread().Equals(TEXT("SpikeC"), ESearchCase::IgnoreCase);
+}
+
 int32 AArenaGameMode::RequestedCombatStage()
 {
 	const int32 FromArgs = FFPSRunArgs::Get().CombatStageIndex();
@@ -124,6 +130,14 @@ void AArenaGameMode::InitGame(const FString& MapName, const FString& Options, FS
 		return;
 	}
 
+	if (WantsSpikeC())
+	{
+		BuildSpikeC(GetWorld());
+		FPSArena::SpawnPreviewLighting(GetWorld());
+		UE_LOG(LogFPSAgent, Log, TEXT("ArenaGameMode: arena=%s %s"), *ArenaName, *Args.ToString());
+		return;
+	}
+
 	if (RequestedCombatStage() >= 0)
 	{
 		BuildCombat(GetWorld());
@@ -156,6 +170,18 @@ void AArenaGameMode::BuildRangeArena(UWorld* World)
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	PlayerStart = World->SpawnActor<APlayerStart>(RangeLayout.PlayerStart.GetLocation(), RangeLayout.PlayerStart.Rotator(), Params);
+}
+
+void AArenaGameMode::BuildSpikeC(UWorld* World)
+{
+	// The probe builds its own floor and bean; the local player only watches.
+	ArenaName = TEXT("spikeC");
+	bStartPlayersAsSpectators = true;
+	FActorSpawnParameters Params;
+	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	World->SpawnActor<ASpikeCProbe>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
+	Bounds = FBox(FVector(-4400.0, -4400.0, 0.0), FVector(4400.0, 4400.0, 600.0));
+	PlayerStart = World->SpawnActor<APlayerStart>(FVector(-3000.0, -1500.0, 800.0), FRotator(-25.0, 45.0, 0.0), Params);
 }
 
 void AArenaGameMode::BuildSpikeA(UWorld* World)
@@ -206,7 +232,7 @@ AActor* AArenaGameMode::ChoosePlayerStart_Implementation(AController* Player)
 void AArenaGameMode::StartPlay()
 {
 	Super::StartPlay();
-	if (ArenaName == TEXT("spikeA") || ArenaName == TEXT("combat"))
+	if (ArenaName == TEXT("spikeA") || ArenaName == TEXT("combat") || ArenaName == TEXT("spikeC"))
 	{
 		return; // the training tasks spawn their own agents and bots
 	}

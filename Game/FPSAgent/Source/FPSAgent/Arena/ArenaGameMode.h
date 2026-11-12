@@ -35,10 +35,13 @@ public:
 	static bool WantsSpikeA();
 	/** -Stage=S0..S3 or fps.Stage S0..S3: the combat stage index, else -1. */
 	static int32 RequestedCombatStage();
+	/** -Stage=SpikeC or fps.Stage SpikeC: the headless mechanics probe (C-006). */
+	static bool WantsSpikeC();
 
 protected:
 	void BuildRangeArena(UWorld* World);
 	void BuildSpikeA(UWorld* World);
+	void BuildSpikeC(UWorld* World);
 	void BuildCombat(UWorld* World);
 	bool BuildMapArena(UWorld* World, const FString& SpecName);
 

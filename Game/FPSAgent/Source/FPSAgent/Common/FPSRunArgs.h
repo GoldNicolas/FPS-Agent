@@ -38,6 +38,8 @@ struct FPSAGENT_API FFPSRunArgs
 	FString SetOverrides;
 
 	bool IsSpikeA() const { return Stage.Equals(TEXT("SpikeA"), ESearchCase::IgnoreCase); }
+	/** -Stage=SpikeC: the headless mechanics probe (C-006). */
+	bool IsSpikeC() const { return Stage.Equals(TEXT("SpikeC"), ESearchCase::IgnoreCase); }
 	/** 0..3 for S0..S3 (case-insensitive), else -1. */
 	static int32 CombatStageIndexOf(const FString& InStage);
 	int32 CombatStageIndex() const { return CombatStageIndexOf(Stage); }

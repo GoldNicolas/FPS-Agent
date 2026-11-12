@@ -93,6 +93,9 @@ bool FFPSRunArgsTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("difficulty clamped"), FFPSRunArgs::Parse(TEXT("-StartDifficulty=3")).StartDifficulty, 1.f);
 	TestEqual(TEXT("eval episodes default"), D.EvalEpisodes, 200);
 	TestFalse(TEXT("eval off by default"), D.bEval);
+	TestTrue(TEXT("SpikeC probe stage"), FFPSRunArgs::Parse(TEXT("-Stage=spikec")).IsSpikeC());
+	TestFalse(TEXT("SpikeC is not combat"), FFPSRunArgs::Parse(TEXT("-Stage=SpikeC")).IsCombatStage());
+	TestFalse(TEXT("no stage: not the probe"), D.IsSpikeC());
 	return true;
 }
 
