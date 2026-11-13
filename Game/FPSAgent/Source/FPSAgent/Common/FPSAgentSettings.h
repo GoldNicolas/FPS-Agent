@@ -25,6 +25,7 @@ public:
 	UPROPERTY(Config, EditAnywhere, Category="Learning") FReachTaskSettings SpikeA;
 	UPROPERTY(Config, EditAnywhere, Category="Learning") FCombatSettings Combat;
 	UPROPERTY(Config, EditAnywhere, Category="Learning") FCurriculumSettings Curriculum;
+	UPROPERTY(Config, EditAnywhere, Category="Learning") FBotBehaviourSettings Bots;
 	/** Mouse look: degrees per mouse count. */
 	UPROPERTY(Config, EditAnywhere, Category="Input") float MouseDegreesPerCount = 0.05f;
 };

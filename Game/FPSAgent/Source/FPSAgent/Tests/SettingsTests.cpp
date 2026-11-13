@@ -32,6 +32,25 @@ bool FFPSSettingsDefaultsTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("S0 agent can't move"), S.Curriculum.S0.bAgentCanMove);
 	TestTrue(TEXT("arenas at least floor + 50 m apart"),
 		C.ArenaSpacingCm >= (S.Curriculum.S0.FloorTiles + 2) * 400.f + 5000.f);
+
+	const FCombatStageSpec& S1 = S.Curriculum.S1;
+	TestEqual(TEXT("S1 time limit 30 s"), S1.TimeLimitSeconds, 30.f);
+	TestTrue(TEXT("S1 agent moves"), S1.bAgentCanMove);
+	TestEqual(TEXT("S1 bots at 60% speed when easy"), S1.BotSpeedScaleEasy, 0.6f);
+	TestEqual(TEXT("S1 bots at full speed when hard"), S1.BotSpeedScaleHard, 1.f);
+	TestTrue(TEXT("S1 cover 0 -> medium"), S1.CoverDensityEasy == 0.f && S1.CoverDensityHard > 0.f && S1.CoverDensityHard <= 0.2f);
+	TestEqual(TEXT("S1 easy mix has no movers"), S1.BehaviourMixEasy.Patrol + S1.BehaviourMixEasy.Explore, 0.f);
+	TestTrue(TEXT("S1 hard mix adds patrol and explore"), S1.BehaviourMixHard.Patrol > 0.f && S1.BehaviourMixHard.Explore > 0.f);
+	TestEqual(TEXT("S0 bots are static"), S.Curriculum.S0.BehaviourMixHard.Static, 1.f);
+	TestTrue(TEXT("Stage(1) is S1"), &S.Curriculum.Stage(1) == &S.Curriculum.S1);
+	TestTrue(TEXT("Stage(0) is S0"), &S.Curriculum.Stage(0) == &S.Curriculum.S0);
+	TestEqual(TEXT("gate level 0.95"), S.Curriculum.GateLevel, 0.95f);
+	const FBotBehaviourSettings& B = S.Bots;
+	TestEqual(TEXT("bot view cone = the agent's"), B.SightFovDeg, C.Perception.FieldOfViewDeg);
+	TestEqual(TEXT("bots remember 3 s"), B.SightMemorySeconds, 3.f);
+	TestEqual(TEXT("gunshots heard within 40 m"), B.GunshotHearingCm, 4000.f);
+	TestEqual(TEXT("running footsteps heard within 15 m"), B.FootstepHearingCm, 1500.f);
+	TestTrue(TEXT("arenas far enough apart for S1"), C.ArenaSpacingCm >= (S1.FloorTiles + 2) * 400.f + 5000.f);
 	return true;
 }
 

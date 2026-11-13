@@ -271,6 +271,19 @@ struct FCombatPerceptionSettings
 	UPROPERTY(EditAnywhere, Category="Perception") float MaxPitchDeg = 80.f;
 };
 
+/** Sampling weights of the scripted-bot behaviours (spec §4), lerped between a stage's easy and hard mix by the difficulty level. */
+USTRUCT(BlueprintType)
+struct FBotBehaviourMix
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, Category="Bots") float Static = 1.f;
+	UPROPERTY(EditAnywhere, Category="Bots") float Strafe = 0.f;
+	UPROPERTY(EditAnywhere, Category="Bots") float Peek = 0.f;
+	UPROPERTY(EditAnywhere, Category="Bots") float Crouch = 0.f;
+	UPROPERTY(EditAnywhere, Category="Bots") float Patrol = 0.f;
+	UPROPERTY(EditAnywhere, Category="Bots") float Explore = 0.f;
+};
+
 /** One curriculum stage (spec §5): each knob has an easy (difficulty 0) and a hard (difficulty 1) value. Build A: S0. */
 USTRUCT(BlueprintType)
 struct FCombatStageSpec
@@ -293,8 +306,90 @@ struct FCombatStageSpec
 	UPROPERTY(EditAnywhere, Category="Stage") float BotSpreadDegHard = 180.f;
 	UPROPERTY(EditAnywhere, Category="Stage") float CrouchedFractionEasy = 0.f;
 	UPROPERTY(EditAnywhere, Category="Stage") float CrouchedFractionHard = 0.3f;
+	/** Cover tiles as a fraction of the interior floor (spec §5, S1: 0 -> "medium"; verify in S1 training). S0: none. */
+	UPROPERTY(EditAnywhere, Category="Stage") float CoverDensityEasy = 0.f;
+	UPROPERTY(EditAnywhere, Category="Stage") float CoverDensityHard = 0.f;
+	/** Share of the cover tiles that are low (120 cm, crouch to hide); the rest are high (250 cm). */
+	UPROPERTY(EditAnywhere, Category="Stage") float LowCoverFraction = 0.5f;
+	/** Bot movement speed as a fraction of the run speed (spec §5, S1: 60% -> 100%). */
+	UPROPERTY(EditAnywhere, Category="Stage") float BotSpeedScaleEasy = 1.f;
+	UPROPERTY(EditAnywhere, Category="Stage") float BotSpeedScaleHard = 1.f;
+	/** Behaviour mix at difficulty 0 and 1 (default: static only, as in S0). */
+	UPROPERTY(EditAnywhere, Category="Stage") FBotBehaviourMix BehaviourMixEasy;
+	UPROPERTY(EditAnywhere, Category="Stage") FBotBehaviourMix BehaviourMixHard;
 	/** Promotion gate: the -Eval clear rate at difficulty 1 (spec §5). */
 	UPROPERTY(EditAnywhere, Category="Stage") float PromotionClearRate = 0.7f;
+};
+
+/** S1 "Movers" (spec §5): the agent moves; 1 -> 5 bots that strafe/peek/crouch, then also patrol/explore; speed 60% -> 100%; cover 0 -> medium; 30 s. */
+inline FCombatStageSpec MakeS1StageSpec()
+{
+	FCombatStageSpec S;
+	S.TimeLimitSeconds = 30.f;
+	S.AimHelperWeight = 0.2f;
+	S.bAgentCanMove = true;
+	S.CoverDensityEasy = 0.f;
+	S.CoverDensityHard = 0.12f; // "medium": 48 of the 400 interior tiles (verify in S1 training)
+	S.BotSpeedScaleEasy = 0.6f;
+	S.BotSpeedScaleHard = 1.f;
+	S.BehaviourMixEasy.Static = 0.f;
+	S.BehaviourMixEasy.Strafe = 1.f;
+	S.BehaviourMixEasy.Peek = 1.f;
+	S.BehaviourMixEasy.Crouch = 1.f;
+	S.BehaviourMixHard = S.BehaviourMixEasy;
+	S.BehaviourMixHard.Patrol = 1.5f;
+	S.BehaviourMixHard.Explore = 1.5f;
+	return S;
+}
+
+/** Scripted-bot senses and behaviour tuning (spec §4). The senses use the same rules as the agent's (hard rule 4, D-024). */
+USTRUCT(BlueprintType)
+struct FBotBehaviourSettings
+{
+	GENERATED_BODY()
+	/** View cone for spotting the agent: the same 103 deg as the agent's (spec §4). */
+	UPROPERTY(EditAnywhere, Category="Senses") float SightFovDeg = 103.f;
+	/** A sighting or a heard sound is acted on only after this delay (S1 constant; S2 makes it a stage knob; verify). */
+	UPROPERTY(EditAnywhere, Category="Senses") float ReactionSeconds = 0.4f;
+	/** How long a bot remembers where it last saw or heard the agent (spec §4: about 3 s). */
+	UPROPERTY(EditAnywhere, Category="Senses") float SightMemorySeconds = 3.f;
+	/** Gunshots are heard within 40 m and running footsteps within 15 m; walking and crouching are silent (spec §4; verify). */
+	UPROPERTY(EditAnywhere, Category="Senses") float GunshotHearingCm = 4000.f;
+	UPROPERTY(EditAnywhere, Category="Senses") float FootstepHearingCm = 1500.f;
+	/** A heard sound gives its position with this much seeded noise (radius). */
+	UPROPERTY(EditAnywhere, Category="Senses") float HearingNoiseCm = 200.f;
+	/** A running bean makes one footstep sound event per this many seconds. */
+	UPROPERTY(EditAnywhere, Category="Senses") float FootstepIntervalSeconds = 0.35f;
+	/** "Running" = faster than WalkSpeed x this, while not walking and not crouched. */
+	UPROPERTY(EditAnywhere, Category="Senses") float SilentSpeedFraction = 1.05f;
+	/** The agent keeps a heard enemy sound in its observation this long (D-031). */
+	UPROPERTY(EditAnywhere, Category="Senses") float SoundMemorySeconds = 1.f;
+	/** Strafe: ADAD flip period and how far from the spawn spot it may drift sideways. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") float StrafePeriodMinSeconds = 0.3f;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float StrafePeriodMaxSeconds = 0.9f;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float StrafeHalfWidthCm = 250.f;
+	/** Peek: time spent out of cover / behind cover before switching. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") float PeekPeriodMinSeconds = 0.8f;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float PeekPeriodMaxSeconds = 2.f;
+	/** Crouch: crouch-spam toggle period. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") float CrouchPeriodMinSeconds = 0.3f;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float CrouchPeriodMaxSeconds = 1.2f;
+	/** Patrol: number of waypoints in the loop and the pause at each. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") int32 PatrolWaypoints = 4;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float PatrolPauseMinSeconds = 0.5f;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float PatrolPauseMaxSeconds = 2.f;
+	/** Explore: random candidate tiles per pick; the least recently visited wins. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") int32 ExploreCandidates = 6;
+	/** Investigate: look around for this long at the target, turning at this rate. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") float InvestigateLookSeconds = 3.f;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float InvestigateTurnDegPerSec = 120.f;
+	/** Path following: a waypoint counts as reached within this distance; waypoints get a seeded offset up to this size. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") float WaypointToleranceCm = 60.f;
+	UPROPERTY(EditAnywhere, Category="Behaviour") float PathOffsetCm = 50.f;
+	/** No progress toward a waypoint for this long: skip it. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") float StuckSeconds = 2.f;
+	/** How fast a bot turns its body toward where it wants to look. */
+	UPROPERTY(EditAnywhere, Category="Behaviour") float TurnRateDegPerSec = 360.f;
 };
 
 /** The automatic difficulty ramp (spec §5) and the stage table. */
@@ -312,6 +407,12 @@ struct FCurriculumSettings
 	/** Knob jitter as a fraction of the easy-hard range. */
 	UPROPERTY(EditAnywhere, Category="Curriculum") float JitterFraction = 0.1f;
 	UPROPERTY(EditAnywhere, Category="Curriculum") FCombatStageSpec S0;
+	UPROPERTY(EditAnywhere, Category="Curriculum") FCombatStageSpec S1 = MakeS1StageSpec();
+	/** Non-review episodes at or above this level count toward the gate-level clear rate `clearTop` (promotion trigger, D-031). */
+	UPROPERTY(EditAnywhere, Category="Curriculum") float GateLevel = 0.95f;
+
+	/** The spec of combat stage Index (0 = S0, 1 = S1). */
+	const FCombatStageSpec& Stage(int32 Index) const { return Index == 1 ? S1 : S0; }
 };
 
 /** Combat stages (S0-S3): rewards, trainer, perception, arena spacing. */
