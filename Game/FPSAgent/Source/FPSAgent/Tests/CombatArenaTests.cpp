@@ -311,6 +311,46 @@ bool FFPSCombatArenaS1FairnessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatArenaHearingNoiseTest, "FPSAgent.Combat.Arena.HearingNoise",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatArenaHearingNoiseTest::RunTest(const FString& Parameters)
+{
+	FPSTest::FTestWorld W;
+	TStrongObjectPtr<UCombatArena> A(NewObject<UCombatArena>(GetTransientPackage()));
+	A->Build(W.World, 0, FVector::ZeroVector, 7, /*StageIndex=*/1);
+	FPSCurriculum::FCombatEpisode E;
+	E.Map = A->GetBaseSpec();
+	E.AgentYawDeg = 0.f;
+	FPSCurriculum::FBotSpawn Far;
+	Far.Offset = FVector2D(1600.0, 200.0);
+	Far.YawDeg = 180.f;
+	Far.Behaviour = FPSBots::EBotBehaviour::Patrol;
+	E.Bots = { Far };
+	auto OffsetFor = [&](int32 Seed)
+	{
+		A->StartEpisode(E, Seed, 0.0);
+		FPSBots::FSoundEvent S;
+		S.Position = A->GetAgent()->GetActorLocation() + FVector(500.0, 0.0, 0.0); // a bot footstep 5 m away
+		S.Time = 0.0;
+		S.Kind = FPSBots::ESoundKind::Footstep;
+		S.Source = 0;
+		A->EmitSound(S);
+		return A->GetSounds().Num() > 0 ? A->GetSounds()[0].HeardOffset : FVector(1.0e9, 0.0, 0.0);
+	};
+	const FVector O1 = OffsetFor(31);
+	const FVector O2 = OffsetFor(31);
+	FPSCombatObs::FObservationData Obs;
+	A->BuildObservation(Obs, 0.0);
+	const int32 HeardCount = Obs.Sounds.Num();
+	const FVector O3 = OffsetFor(32);
+	TestTrue(TEXT("same seed, same noise"), O1.Equals(O2, 1e-6));
+	TestFalse(TEXT("another seed, other noise"), O1.Equals(O3, 1e-6));
+	TestTrue(TEXT("a disc of at most HearingNoiseCm, not exactly zero"), O1.Size2D() > 0.0 && O1.Size2D() <= UFPSAgentSettings::Get().Bots.HearingNoiseCm + 1e-3);
+	TestEqual(TEXT("flat (Z = 0)"), static_cast<float>(O1.Z), 0.f);
+	TestEqual(TEXT("the agent still hears the sound"), HeardCount, 1);
+	return true;
+}
+
 IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatArenaScriptedS1Test, "FPSAgent.Combat.Arena.ScriptedS1",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFPSCombatArenaScriptedS1Test::RunTest(const FString& Parameters)

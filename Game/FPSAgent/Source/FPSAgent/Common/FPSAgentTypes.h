@@ -311,7 +311,7 @@ struct FCombatStageSpec
 	UPROPERTY(EditAnywhere, Category="Stage") float CoverDensityHard = 0.f;
 	/** Share of the cover tiles that are low (FPSMapFormat::LowCoverCm, crouch to hide); the rest are high (HighCoverCm). Starting guess (D-031); verify in S1 training. */
 	UPROPERTY(EditAnywhere, Category="Stage") float LowCoverFraction = 0.5f;
-	/** Bot movement speed as a fraction of the run speed (spec §5, S1: 60% -> 100%). */
+	/** Bot movement speed as a fraction of the run speed (spec §5, S1: 60% -> 100%). A scale of 0 freezes a bot. */
 	UPROPERTY(EditAnywhere, Category="Stage") float BotSpeedScaleEasy = 1.f;
 	UPROPERTY(EditAnywhere, Category="Stage") float BotSpeedScaleHard = 1.f;
 	/** Behaviour mix at difficulty 0 and 1 (default: static only, as in S0). */
@@ -358,7 +358,7 @@ struct FBotBehaviourSettings
 	UPROPERTY(EditAnywhere, Category="Senses") float SightFovDeg = 103.f;
 	/** A sighting or a heard sound is acted on only after this delay (S1 constant; S2 makes it a stage knob; verify). */
 	UPROPERTY(EditAnywhere, Category="Senses") float ReactionSeconds = 0.4f;
-	/** How long a bot remembers where it last saw or heard the agent (spec §4: about 3 s). */
+	/** S2+: how long a bot that shoots keeps aiming at the last seen position (about 3 s, spec §4). Not used in S1: a bot that loses sight keeps walking to the last stimulus (Investigate). */
 	UPROPERTY(EditAnywhere, Category="Senses") float SightMemorySeconds = 3.f;
 	/** Gunshots are heard within 40 m and running footsteps within 15 m; walking and crouching are silent (spec §4; verify). */
 	UPROPERTY(EditAnywhere, Category="Senses") float GunshotHearingCm = 4000.f;

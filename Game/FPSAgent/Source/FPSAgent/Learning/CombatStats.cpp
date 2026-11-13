@@ -24,6 +24,7 @@ namespace FPSCombatStats
 		Shots += R.Shots;
 		Hits += R.Hits;
 		Headshots += R.Headshots;
+		BotSpeedSum += R.BotSpeedCmS;
 		if (!R.bReview && R.Level >= TopLevel - 1e-4f)
 		{
 			++TopEpisodes;
@@ -41,14 +42,15 @@ namespace FPSCombatStats
 	double FWindow::HeadshotRate() const { return Ratio(static_cast<double>(Headshots), static_cast<double>(Hits)); }
 	double FWindow::AvgClearSeconds() const { return Ratio(ClearSecondsSum, Clears); }
 	double FWindow::KillsPerEpisode() const { return Ratio(static_cast<double>(Kills), Episodes); }
+	double FWindow::AvgBotSpeed() const { return Ratio(BotSpeedSum, Episodes); }
 
 	FString LogLine(const FWindow& W, double GameTime, const FLevelSummary& Level, double DecisionsPerSecond)
 	{
 		FString Line = FString::Printf(
-			TEXT("CombatStats: gameTime=%.0fs episodes=%d clear=%.1f%% died=%.1f%% timeout=%.1f%% avgReturn=%.3f kills/ep=%.2f acc=%.1f%% hs=%.1f%% clearTime=%.1fs level=%.2f(%.2f..%.2f) decisions/s(wall)=%.0f clearTop=%.1f%%(n=%d) terms:"),
+			TEXT("CombatStats: gameTime=%.0fs episodes=%d clear=%.1f%% died=%.1f%% timeout=%.1f%% avgReturn=%.3f kills/ep=%.2f acc=%.1f%% hs=%.1f%% clearTime=%.1fs level=%.2f(%.2f..%.2f) decisions/s(wall)=%.0f clearTop=%.1f%%(n=%d) botSpeed=%.0fcm/s terms:"),
 			GameTime, W.Episodes, 100.0 * W.ClearRate(), 100.0 * W.DeathRate(), 100.0 * W.TimeoutRate(), W.AvgReturn(),
 			W.KillsPerEpisode(), 100.0 * W.Accuracy(), 100.0 * W.HeadshotRate(), W.AvgClearSeconds(), Level.Mean, Level.Min, Level.Max,
-			DecisionsPerSecond, 100.0 * W.ClearRateTop(), W.TopEpisodes);
+			DecisionsPerSecond, 100.0 * W.ClearRateTop(), W.TopEpisodes, W.AvgBotSpeed());
 		for (int32 i = 0; i < FPSCombatReward::TermCount; ++i)
 		{
 			Line += FString::Printf(TEXT(" %s=%.3f"), FPSCombatReward::TermName(static_cast<FPSCombatReward::ETerm>(i)), W.AvgTerm(i));
@@ -63,7 +65,7 @@ namespace FPSCombatStats
 		{
 			H += FString::Printf(TEXT(",term_%s"), FPSCombatReward::TermName(static_cast<FPSCombatReward::ETerm>(i)));
 		}
-		H += TEXT(",clearRateTop,episodesTop");
+		H += TEXT(",clearRateTop,episodesTop,botSpeed");
 		return H;
 	}
 
@@ -76,7 +78,7 @@ namespace FPSCombatStats
 		{
 			R += FString::Printf(TEXT(",%.4f"), W.AvgTerm(i));
 		}
-		R += FString::Printf(TEXT(",%.4f,%d"), W.ClearRateTop(), W.TopEpisodes);
+		R += FString::Printf(TEXT(",%.4f,%d,%.1f"), W.ClearRateTop(), W.TopEpisodes, W.AvgBotSpeed());
 		return R;
 	}
 
@@ -96,6 +98,7 @@ namespace FPSCombatStats
 		Obj->SetNumberField(TEXT("accuracy"), W.Accuracy());
 		Obj->SetNumberField(TEXT("headshotRate"), W.HeadshotRate());
 		Obj->SetNumberField(TEXT("avgClearSeconds"), W.AvgClearSeconds());
+		Obj->SetNumberField(TEXT("botSpeed"), W.AvgBotSpeed());
 		Obj->SetNumberField(TEXT("promotionClearRate"), PromotionClearRate);
 		Obj->SetBoolField(TEXT("passed"), W.Episodes > 0 && W.ClearRate() >= PromotionClearRate);
 		const TSharedRef<FJsonObject> Terms = MakeShared<FJsonObject>();

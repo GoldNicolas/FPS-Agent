@@ -21,6 +21,8 @@ namespace FPSCombatStats
 		int32 Hits = 0;
 		int32 Headshots = 0;
 		float Seconds = 0.f;
+		/** Mean horizontal speed of the living bots over the episode (cm/s), 0 in S0. */
+		float BotSpeedCmS = 0.f;
 	};
 
 	struct FPSAGENT_API FWindow
@@ -40,6 +42,8 @@ namespace FPSCombatStats
 		int32 TopEpisodes = 0;
 		int32 TopClears = 0;
 		float TopLevel = 0.95f;
+		/** Sum of every episode's BotSpeedCmS (review included). */
+		double BotSpeedSum = 0.0;
 
 		void Add(const FEpisodeRecord& R);
 		void Reset() { const float Keep = TopLevel; *this = FWindow(); TopLevel = Keep; }
@@ -55,6 +59,8 @@ namespace FPSCombatStats
 		double HeadshotRate() const;
 		double AvgClearSeconds() const;
 		double KillsPerEpisode() const;
+		/** Mean of the episodes' bot speeds (cm/s), review included. */
+		double AvgBotSpeed() const;
 	};
 
 	struct FLevelSummary

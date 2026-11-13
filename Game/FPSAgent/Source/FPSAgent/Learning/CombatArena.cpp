@@ -61,7 +61,7 @@ void UCombatArena::Build(UWorld* World, int32 InArenaIndex, const FVector& InCen
 	Graph = FPSNav::FTileGraph::Build(CurrentMap);
 	// Cover changes per episode (S1+): a pool of movable cubes sized for the densest layout, parked hidden below the floor (D-031).
 	const int32 Interior = StageSpec().FloorTiles * StageSpec().FloorTiles;
-	const int32 PoolSize = FMath::CeilToInt(StageSpec().CoverDensityHard * (1.f + Settings().Curriculum.JitterFraction) * Interior);
+	const int32 PoolSize = FMath::CeilToInt(FMath::Max(StageSpec().CoverDensityEasy, StageSpec().CoverDensityHard) * (1.f + Settings().Curriculum.JitterFraction) * Interior);
 	for (int32 i = 0; i < PoolSize; ++i)
 	{
 		AStaticMeshActor* Block = FPSArena::SpawnBlock(World, MapOrigin + FVector(0.0, 0.0, -1000.0 - 10.0 * i), FVector(BaseSpec.TileCm, BaseSpec.TileCm, FPSMapFormat::LowCoverCm));
@@ -93,6 +93,10 @@ void UCombatArena::Build(UWorld* World, int32 InArenaIndex, const FVector& InCen
 		{
 			UE_LOG(LogFPSAgent, Error, TEXT("Combat: could not spawn bot %d for arena %d"), i, ArenaIndex);
 			continue;
+		}
+		if (!Bot->GetController())
+		{
+			Bot->SpawnDefaultController(); // CharacterMovement only simulates controlled pawns
 		}
 		Bot->GetHealth()->OnDamaged.AddUObject(this, &UCombatArena::OnBotDamaged);
 		Bot->GetHealth()->OnDied.AddUObject(this, &UCombatArena::OnBotDied);
@@ -150,6 +154,15 @@ void UCombatArena::ApplyCover(const FMapSpec& Map)
 	ParkRest();
 }
 
+void UCombatArena::AddSound(FPSBots::FSoundEvent E)
+{
+	// The agent hears a rough position: seeded noise on a disc, drawn once per sound with the bots' formula (spec section 2).
+	const float Angle = SoundRng.FRandRange(0.f, 2.f * PI);
+	const float Radius = Settings().Bots.HearingNoiseCm * FMath::Sqrt(SoundRng.FRand());
+	E.HeardOffset = FVector(Radius * FMath::Cos(Angle), Radius * FMath::Sin(Angle), 0.0);
+	Sounds.Add(E);
+}
+
 void UCombatArena::StartEpisode(const FPSCurriculum::FS0Episode& Config, int32 Seed, double Now)
 {
 	StartEpisode(FPSCurriculum::FromS0(Config, BaseSpec), Seed, Now);
@@ -170,15 +183,18 @@ void UCombatArena::StartEpisode(const FPSCurriculum::FCombatEpisode& Config, int
 	Headshots = 0;
 	Tracks.Reset();
 	Sounds.Reset();
+	SoundRng.Initialize(static_cast<int32>(HashCombineFast(static_cast<uint32>(Seed), 0x50D5Eu) & 0x7fffffff));
+	BotSpeedSum = 0.0;
+	BotSpeedSamples = 0;
 	for (double& T : NextFootstep) { T = Now; }
 	CurrentMap = Config.Map;
 	Graph = FPSNav::FTileGraph::Build(CurrentMap);
-	if (StageIndex > 0)
-	{
-		ApplyCover(CurrentMap);
-	}
 	if (!Agent)
 	{
+		if (StageIndex > 0)
+		{
+			ApplyCover(CurrentMap);
+		}
 		return;
 	}
 	const UFPSAgentSettings& S = Settings();
@@ -228,6 +244,12 @@ void UCombatArena::StartEpisode(const FPSCurriculum::FCombatEpisode& Config, int
 		++ActiveBots;
 	}
 
+	// Cover goes in after the beans stood up and teleported, so a crouched bean can't be trapped under a block that moved onto its old spot.
+	if (StageIndex > 0)
+	{
+		ApplyCover(CurrentMap);
+	}
+
 	FPSBots::FBotSetup AgentSetup;
 	AgentSetup.Behaviour = FPSBots::EBotBehaviour::Explore;
 	AgentSetup.FacingYawDeg = Config.AgentYawDeg;
@@ -249,6 +271,11 @@ void UCombatArena::TickAction(float DeltaSeconds)
 	{
 		TickBots(TickNow, DeltaSeconds);
 		EmitFootsteps(TickNow);
+	}
+	{
+		const FBotBehaviourSettings& Bs = S.Bots;
+		const double Keep = Bs.ReactionSeconds + Bs.SoundMemorySeconds + 1.0;
+		Sounds.RemoveAll([TickNow, Keep](const FPSBots::FSoundEvent& E) { return TickNow - E.Time > Keep; }); // every stage: the agent's own shots pile up in S0 too
 	}
 	if (!Agent || IsAgentDead())
 	{
@@ -281,6 +308,8 @@ void UCombatArena::TickBots(double Now, float DeltaSeconds)
 		if (Bot && Bot->IsAlive())
 		{
 			Bot->Drive(Brains[i].Update(ToLocal(Bot->GetActorLocation()), Now, B), DeltaSeconds, B.TurnRateDegPerSec);
+			BotSpeedSum += Bot->GetHorizontalSpeed();
+			++BotSpeedSamples;
 		}
 	}
 }
@@ -303,7 +332,7 @@ void UCombatArena::EmitFootsteps(double Now)
 		E.Time = Now;
 		E.Kind = FPSBots::ESoundKind::Footstep;
 		E.Source = Source;
-		Sounds.Add(E);
+		AddSound(E);
 		NextFootstep[Slot] = Now + S.Bots.FootstepIntervalSeconds;
 	};
 	if (!IsAgentDead())
@@ -317,8 +346,6 @@ void UCombatArena::EmitFootsteps(double Now)
 			Emit(Bots[i], i, i + 1);
 		}
 	}
-	const double Keep = S.Bots.ReactionSeconds + S.Bots.SoundMemorySeconds + 1.0;
-	Sounds.RemoveAll([Now, Keep](const FPSBots::FSoundEvent& E) { return Now - E.Time > Keep; });
 }
 
 void UCombatArena::SetAction(const FPSCombatObs::FAgentAction& Action)
@@ -390,6 +417,7 @@ FPSCombatStats::FEpisodeRecord UCombatArena::FinishEpisode(ECombatEpisodeEnd End
 	R.Hits = Hits;
 	R.Headshots = Headshots;
 	R.Seconds = static_cast<float>(Now - EpisodeStart);
+	R.BotSpeedCmS = BotSpeedSamples > 0 ? static_cast<float>(BotSpeedSum / static_cast<double>(BotSpeedSamples)) : 0.f;
 	return R;
 }
 
@@ -463,7 +491,7 @@ void UCombatArena::BuildObservation(FPSCombatObs::FObservationData& Out, double 
 	Heard.StableSort([](const FPSBots::FSoundEvent& A, const FPSBots::FSoundEvent& B) { return A.Time > B.Time; }); // newest first
 	for (int32 i = 0; i < Heard.Num() && i < P.MaxSounds; ++i)
 	{
-		const FVector Delta = Heard[i]->Position - Eye;
+		const FVector Delta = Heard[i]->Position + Heard[i]->HeardOffset - Eye; // rough: the seeded noise drawn when the sound was made
 		Out.Sounds.Add(FPSCombatObs::PackSound(FPSPerception::ToViewFrame(Delta, Yaw), static_cast<float>(Delta.Size()),
 			static_cast<float>(Now - Heard[i]->Time), P, Bs.SoundMemorySeconds));
 	}
@@ -515,7 +543,7 @@ FPSCombatObs::FAgentAction UCombatArena::ScriptedAction(float DecisionSeconds)
 	if (Newest)
 	{
 		LastScriptedSoundTime = Newest->Time;
-		AgentBrain.Investigate(ToLocal(Newest->Position), Here, Now, B);
+		AgentBrain.Investigate(ToLocal(Newest->Position + Newest->HeardOffset), Here, Now, B);
 	}
 	const FPSBots::FBotIntent Intent = AgentBrain.Update(Here, Now, B);
 	const float MaxPerDecision = FMath::Max(1e-3f, S.Combat.Perception.MaxTurnRateDegPerSec * DecisionSeconds);
@@ -660,7 +688,7 @@ void UCombatArena::OnAgentShot(const FShotResult& Shot)
 		E.Time = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
 		E.Kind = FPSBots::ESoundKind::Gunshot;
 		E.Source = INDEX_NONE;
-		Sounds.Add(E);
+		AddSound(E);
 	}
 	++Shots;
 	if (Shot.Zone != EHitZone::None && BotIndexOf(Shot.HitActor.Get()) != INDEX_NONE)

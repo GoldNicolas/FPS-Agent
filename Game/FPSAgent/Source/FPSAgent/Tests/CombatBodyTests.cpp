@@ -63,6 +63,10 @@ bool FFPSScriptedBotTest::RunTest(const FString& Parameters)
 	TestFalse(TEXT("visible"), Bot->IsHidden());
 	// crouched capsule: the feet stay where the standing spawn put them, so the centre drops by the half-height difference
 	TestTrue(TEXT("placed"), FVector2D(Bot->GetActorLocation()).Equals(FVector2D(500.0, 0.0), 1.0));
+	{
+		const UFPSAgentSettings& Sg = UFPSAgentSettings::Get();
+		TestEqual(TEXT("crouched: lowered by the half-height difference"), static_cast<float>(Bot->GetActorLocation().Z), 90.f - (Sg.Body.StandingHalfHeight - Sg.Body.CrouchedHalfHeight), 1.f);
+	}
 	TestEqual(TEXT("faces yaw 180"), FMath::Abs(static_cast<float>(FRotator::NormalizeAxis(Bot->GetActorRotation().Yaw))), 180.f, 1e-3f);
 	TestTrue(TEXT("wants to crouch"), Bot->GetCharacterMovement()->bWantsToCrouch);
 
@@ -75,6 +79,13 @@ bool FFPSScriptedBotTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("alive again next episode"), Bot->IsAlive());
 	TestEqual(TEXT("full health"), Bot->GetHealth()->GetHealth(), 100.f);
 	TestFalse(TEXT("standing"), Bot->GetCharacterMovement()->bWantsToCrouch);
+	TestEqual(TEXT("standing: the spawn Z"), static_cast<float>(Bot->GetActorLocation().Z), 90.f, 1.f);
+
+	// crouched -> crouched, elsewhere: still crouched, at the new spot
+	Bot->Activate(FVector(100.0, 0.0, 90.0), 0.f, true, 5);
+	Bot->Activate(FVector(-300.0, 200.0, 90.0), 0.f, true, 6);
+	TestTrue(TEXT("still crouched after a crouched re-activation"), Bot->bIsCrouched);
+	TestTrue(TEXT("...at the new XY"), FVector2D(Bot->GetActorLocation()).Equals(FVector2D(-300.0, 200.0), 1.0));
 	return true;
 }
 
@@ -106,6 +117,24 @@ bool FFPSScriptedBotCrouchDriveTest::RunTest(const FString& Parameters)
 	Bot->Drive(I, 0.1f, 360.f);
 	TestTrue(TEXT("move input toward +Y"), Bot->GetPendingMovementInputVector().GetSafeNormal().Equals(FVector(0.0, 1.0, 0.0), 1e-3));
 	TestEqual(TEXT("turns at most 36 deg in 0.1 s at 360 deg/s"), static_cast<float>(Bot->GetActorRotation().Yaw), 36.f, 1e-3f);
+
+	// A zero MoveDir adds no movement input; a dead bot ignores Drive; bCrouch is passed on (bWantsToCrouch: the capsule changes on the movement tick).
+	AScriptedBot* Idle = W.World->SpawnActor<AScriptedBot>(FVector(2000.0, 0.0, 100.0), FRotator::ZeroRotator, P);
+	Idle->Activate(FVector(2000.0, 0.0, StandZ), 0.f, false, 3);
+	FPSBots::FBotIntent Still;
+	Idle->Drive(Still, 0.1f, 360.f);
+	TestTrue(TEXT("a zero MoveDir gives no pending input"), Idle->GetPendingMovementInputVector().IsNearlyZero());
+	Still.bCrouch = true;
+	Idle->Drive(Still, 0.1f, 360.f);
+	TestTrue(TEXT("bCrouch asks to crouch"), Idle->GetCharacterMovement()->bWantsToCrouch);
+	Still.bCrouch = false;
+	Idle->Drive(Still, 0.1f, 360.f);
+	TestFalse(TEXT("...and to stand again"), Idle->GetCharacterMovement()->bWantsToCrouch);
+	Idle->GetHealth()->ApplyHit(500.f, nullptr);
+	FPSBots::FBotIntent Run;
+	Run.MoveDir = FVector2D(1.0, 0.0);
+	Idle->Drive(Run, 0.1f, 360.f);
+	TestTrue(TEXT("a dead bot ignores Drive"), Idle->GetPendingMovementInputVector().IsNearlyZero());
 	return true;
 }
 

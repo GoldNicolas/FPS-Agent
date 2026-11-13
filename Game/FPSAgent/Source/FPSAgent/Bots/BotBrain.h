@@ -43,6 +43,7 @@ namespace FPSBots
 		bool IsMover() const { return Setup.Behaviour == EBotBehaviour::Patrol || Setup.Behaviour == EBotBehaviour::Explore; }
 		bool IsInvestigating() const { return Mode != EMode::Base; }
 		const TArray<FIntPoint>& GetWaypoints() const { return Waypoints; }
+		int32 GetPathIndex() const { return PathIndex; }
 
 	private:
 		enum class EMode : uint8 { Base, Investigate, LookAround };
@@ -64,6 +65,8 @@ namespace FPSBots
 
 		TArray<FVector2D> PathPoints;
 		int32 PathIndex = 0;
+		/** The tile the current Investigate path leads to ((-1, -1) = none); reset by Start. */
+		FIntPoint InvestigateGoal = FIntPoint(-1, -1);
 		double BestDist = TNumericLimits<double>::Max();
 		double ProgressTime = 0.0;
 

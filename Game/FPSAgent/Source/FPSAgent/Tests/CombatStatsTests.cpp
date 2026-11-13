@@ -57,21 +57,24 @@ IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatStatsTopTest, "FPSAgent.Combat.StatsC
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
 bool FFPSCombatStatsTopTest::RunTest(const FString& Parameters)
 {
-	auto Rec = [](float Level, bool bCleared, bool bReview) { FEpisodeRecord R; R.Level = Level; R.bCleared = bCleared; R.bReview = bReview; return R; };
+	auto Rec = [](float Level, bool bCleared, bool bReview, float BotSpeed = 0.f) { FEpisodeRecord R; R.Level = Level; R.bCleared = bCleared; R.bReview = bReview; R.BotSpeedCmS = BotSpeed; return R; };
 	FWindow W;
 	W.TopLevel = 0.95f;
-	W.Add(Rec(1.f, true, false));    // counts, cleared
-	W.Add(Rec(0.96f, false, false)); // counts, not cleared
+	W.Add(Rec(1.f, true, false, 100.f)); // counts, cleared
+	W.Add(Rec(0.96f, false, false, 300.f)); // counts, not cleared
 	W.Add(Rec(0.5f, true, false));   // below the gate level
 	W.Add(Rec(1.f, true, true));     // review episode: never counts
 	TestEqual(TEXT("gate-level episodes"), W.TopEpisodes, 2);
+	TestEqual(TEXT("bot speed averages over the episodes (100 and 300 and two zeros)"), static_cast<float>(W.AvgBotSpeed()), 100.f, 1e-3f);
 	TestEqual(TEXT("gate-level clear rate"), static_cast<float>(W.ClearRateTop()), 0.5f, 1e-6f);
 	TestTrue(TEXT("log line has clearTop"), LogLine(W, 1.0, FLevelSummary(), 1.0).Contains(TEXT("clearTop=50.0%(n=2)")));
 	TArray<FString> Header, Row;
 	CsvHeader().ParseIntoArray(Header, TEXT(","), false);
 	CsvRow(W, 1.0, FLevelSummary(), 1.0).ParseIntoArray(Row, TEXT(","), false);
 	TestEqual(TEXT("csv columns still match"), Row.Num(), Header.Num());
-	TestEqual(TEXT("new columns are last"), Header.Last(), FString(TEXT("episodesTop")));
+	TestEqual(TEXT("new columns are last"), Header.Last(), FString(TEXT("botSpeed")));
+	TestEqual(TEXT("...after episodesTop"), Header[Header.Num() - 2], FString(TEXT("episodesTop")));
+	TestTrue(TEXT("log line has botSpeed"), LogLine(W, 1.0, FLevelSummary(), 1.0).Contains(TEXT("botSpeed=")));
 	W.TopLevel = 0.9f;
 	W.Reset();
 	TestEqual(TEXT("reset clears the counts"), W.TopEpisodes, 0);

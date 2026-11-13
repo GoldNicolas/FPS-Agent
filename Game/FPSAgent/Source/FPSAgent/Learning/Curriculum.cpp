@@ -29,10 +29,12 @@ namespace
 		return FPSBots::EBotBehaviour::Explore;
 	}
 
-	/** A free tile near Near (radius 2, row-major) hidden from the agent's tile, with a free 4-neighbour the agent can see. */
-	bool FindPeekPair(const FMapSpec& Map, const FPSNav::FTileGraph& G, const FIntPoint& Agent, const FIntPoint& Near, const TSet<FIntPoint>& Taken, const FVector2D& AgentLocal, float MinDist, float MaxDist, FIntPoint& OutHidden, FIntPoint& OutExposed)
+	/** Every (hidden, exposed) pair near Near (radius 2): a free tile hidden from the agent's tile with a free 4-neighbour the agent can see.
+	 *  One pair is picked uniformly with one Rng draw, so peeks don't lean towards the north-west. False when there is none. */
+	bool FindPeekPair(FRandomStream& Rng, const FMapSpec& Map, const FPSNav::FTileGraph& G, const FIntPoint& Agent, const FIntPoint& Near, const TSet<FIntPoint>& Taken, const FVector2D& AgentLocal, float MinDist, float MaxDist, FIntPoint& OutHidden, FIntPoint& OutExposed)
 	{
 		static const FIntPoint Dirs[4] = { FIntPoint(-1, 0), FIntPoint(1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
+		TArray<TPair<FIntPoint, FIntPoint>> Pairs;
 		for (int32 Dr = -2; Dr <= 2; ++Dr)
 		{
 			for (int32 Dc = -2; Dc <= 2; ++Dc)
@@ -52,14 +54,19 @@ namespace
 					const FIntPoint E = H + D;
 					if (G.IsWalkable(E) && E != Agent && !Taken.Contains(E) && FPSNav::HasTileLos(Map, Agent, E))
 					{
-						OutHidden = H;
-						OutExposed = E;
-						return true;
+						Pairs.Emplace(H, E);
 					}
 				}
 			}
 		}
-		return false;
+		if (Pairs.Num() == 0)
+		{
+			return false;
+		}
+		const TPair<FIntPoint, FIntPoint>& Pick = Pairs[Rng.RandRange(0, Pairs.Num() - 1)];
+		OutHidden = Pick.Key;
+		OutExposed = Pick.Value;
+		return true;
 	}
 
 	/**
@@ -253,7 +260,7 @@ namespace FPSCurriculum
 			if (Bot.Behaviour == FPSBots::EBotBehaviour::Peek)
 			{
 				FIntPoint Hidden, Exposed;
-				if (FindPeekPair(E.Map, G, AgentTile, Tile, Taken, AgentLocal, MinDist, MaxDist, Hidden, Exposed))
+				if (FindPeekPair(Rng, E.Map, G, AgentTile, Tile, Taken, AgentLocal, MinDist, MaxDist, Hidden, Exposed))
 				{
 					Tile = Hidden;
 					Bot.PeekHidden = Hidden;

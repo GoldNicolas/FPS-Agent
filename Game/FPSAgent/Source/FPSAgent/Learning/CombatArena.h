@@ -48,7 +48,7 @@ public:
 	const TArray<FPSBots::FSoundEvent>& GetSounds() const { return Sounds; }
 	int32 GetVisibleCoverCount() const { return VisibleCover; }
 	/** Adds a sound to this arena's buffer (bots and the agent hear only their own arena: hard rule 3). */
-	void EmitSound(const FPSBots::FSoundEvent& Event) { Sounds.Add(Event); }
+	void EmitSound(const FPSBots::FSoundEvent& Event) { AddSound(Event); }
 	/** Every tick: the time penalty, plus the held action (aim step, movement). */
 	void TickAction(float DeltaSeconds);
 	/** Once per decision, before completion, reward and observation: perception, first sightings, clear bonus, aim helper. */
@@ -81,6 +81,8 @@ private:
 	void ApplyCover(const FMapSpec& Map);
 	void TickBots(double Now, float DeltaSeconds);
 	void EmitFootsteps(double Now);
+	/** The only way into Sounds: draws the agent's heard-position noise (HeardOffset) from SoundRng. */
+	void AddSound(FPSBots::FSoundEvent E);
 	void SenseBots(double Now);
 	void Sense(TArray<FPSPerception::FSighting>& Out) const;
 	float NearestVisibleAimErrorDeg(const TArray<FPSPerception::FSighting>& Sightings) const;
@@ -127,6 +129,9 @@ private:
 	TArray<FPSBots::FBotSenses> Senses;
 	TArray<FRandomStream> BotRngs;
 	TArray<FPSBots::FSoundEvent> Sounds;
+	FRandomStream SoundRng;
+	double BotSpeedSum = 0.0;
+	int64 BotSpeedSamples = 0;
 	/** Next footstep time per source: [0] = the agent, [i + 1] = bot i. */
 	TArray<double> NextFootstep;
 	/** The -Scripted reference's explore brain (S1+). The policy never reads it. */

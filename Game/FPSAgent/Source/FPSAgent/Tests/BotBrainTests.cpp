@@ -196,6 +196,19 @@ bool FFPSBotBrainInvestigateTest::RunTest(const FString& Parameters)
 	Snap.Investigate(FPSNav::TileCenterLocal(Map, FIntPoint(6, 3)), Start, 0.0, B); // (6,3) is a cover tile in the wall
 	TestTrue(TEXT("a stimulus on cover snaps to a walkable tile"), Snap.IsInvestigating());
 
+	// The same goal tile again keeps the path (no A* re-plan); another tile re-plans from the start of the new path.
+	FBotBrain Same;
+	Same.Start(Setup(EBotBehaviour::Patrol), Map, G, 12, Start, 0.0, B);
+	Same.Investigate(Target, Start, 0.0, B);
+	FSim SS{ Start };
+	SS.Run(Same, Map, 1.5f, 400.f, B);
+	const int32 Index = Same.GetPathIndex();
+	TestTrue(TEXT("the path advanced while walking"), Index > 0);
+	Same.Investigate(Target + FVector2D(10.0, 10.0), SS.Pos, SS.Now, B); // the same tile
+	TestEqual(TEXT("the same goal tile doesn't re-plan"), Same.GetPathIndex(), Index);
+	Same.Investigate(FPSNav::TileCenterLocal(Map, FIntPoint(2, 8)), SS.Pos, SS.Now, B);
+	TestEqual(TEXT("a different tile re-plans"), Same.GetPathIndex(), 0);
+
 	FMapSpec Pocket = FPSArena::MakeOpenFloorSpec(10, TEXT("pocket"));
 	Pocket.Tiles[1][2] = TEXT('h'); Pocket.Tiles[3][2] = TEXT('h'); Pocket.Tiles[2][1] = TEXT('h'); Pocket.Tiles[2][3] = TEXT('h');
 	const FPSNav::FTileGraph PG = FPSNav::FTileGraph::Build(Pocket);

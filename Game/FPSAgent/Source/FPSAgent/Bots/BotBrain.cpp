@@ -192,9 +192,14 @@ namespace FPSBots
 			return;
 		}
 		const FIntPoint Goal = NearestWalkable(FPSNav::TileAt(*Map, Target), Target);
+		if (Mode == EMode::Investigate && Goal == InvestigateGoal)
+		{
+			return; // the same goal tile: keep the current path instead of re-running A* (the agent fires about every decision)
+		}
 		if (Goal.X >= 0 && PlanTo(Goal, Pos, Now, B))
 		{
 			Mode = EMode::Investigate;
+			InvestigateGoal = Goal;
 		}
 	}
 

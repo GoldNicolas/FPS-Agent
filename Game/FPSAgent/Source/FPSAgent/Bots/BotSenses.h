@@ -16,6 +16,9 @@ namespace FPSBots
 		ESoundKind Kind = ESoundKind::Footstep;
 		/** INDEX_NONE = the agent, else the bot index. */
 		int32 Source = INDEX_NONE;
+		/** Seeded noise drawn once when the sound is made (a disc of radius HearingNoiseCm, Z = 0). The agent hears Position + HeardOffset:
+		 *  a direction and a rough distance, like the bots (spec §2). Audibility (CanHear) still uses the true Position. */
+		FVector HeardOffset = FVector::ZeroVector;
 	};
 
 	/** Running makes footstep sounds; walking, crouching and standing still are silent (spec §4). */

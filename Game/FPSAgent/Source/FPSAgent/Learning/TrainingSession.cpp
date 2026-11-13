@@ -180,9 +180,13 @@ bool UTrainingSession::LoadSnapshots(const FString& Dir)
 		const FShape After = ShapeOf(Items[i].Value);
 		if (Before[i].bKnown && (After.In != Before[i].In || After.Out != Before[i].Out || After.Hash != Before[i].Hash))
 		{
-			UE_LOG(LogFPSAgent, Error, TEXT("%s: snapshot %s doesn't match this build's network (inputs %d vs %d, outputs %d vs %d, hash %d vs %d). Resume only snapshots from the same build and network settings."),
-				*Config.LogPrefix, *File.FilePath, After.In, Before[i].In, After.Out, Before[i].Out, After.Hash, Before[i].Hash);
+			UE_LOG(LogFPSAgent, Error, TEXT("%s: snapshot %s doesn't match this build's network (snapshot: inputs %d, outputs %d, hash %d; this build: inputs %d, outputs %d, hash %d). Resume only snapshots from the same build and network settings."),
+				*Config.LogPrefix, *File.FilePath, After.In, After.Out, After.Hash, Before[i].In, Before[i].Out, Before[i].Hash);
 			return false;
+		}
+		if (!Before[i].bKnown)
+		{
+			UE_LOG(LogFPSAgent, Warning, TEXT("%s: snapshot %s: this build's network shape wasn't known before loading, so the compatibility check was skipped for this file."), *Config.LogPrefix, *File.FilePath);
 		}
 	}
 	UE_LOG(LogFPSAgent, Display, TEXT("%s: loaded %d snapshots from %s"), *Config.LogPrefix, Items.Num(), *Dir);
