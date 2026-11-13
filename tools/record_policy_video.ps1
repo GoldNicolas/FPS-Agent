@@ -27,6 +27,8 @@ param(
 	[int]$Width = 1920,
 	[int]$Height = 1080,
 	[string]$Title = '',
+	# Settings overrides passed to the game as -Set= (D-025), e.g. "Curriculum.S0.bAgentCanMove=true". Use the same values the snapshot trained with.
+	[string]$Set = '',
 	[string]$Out = '',
 	[int]$TimeoutMinutes = 90,
 	[switch]$KeepFrames
@@ -66,6 +68,7 @@ $GameArgs = @(
 	# Readability: no motion blur (the agent turns up to 720 deg/s) and no auto-exposure flicker between sky and walls.
 	"-ExecCmds=`"$ViewCmd, fps.ShowShots 1, r.MotionBlurQuality 0, r.EyeAdaptationQuality 0`""
 )
+if ($Set) { $GameArgs += "-Set=`"$Set`"" }
 Write-Host "Recording $Episodes episodes ($View view, seed $Seed) ..."
 $p = Start-Process $Editor -ArgumentList $GameArgs -PassThru
 if (-not $p.WaitForExit($TimeoutMinutes * 60 * 1000)) {

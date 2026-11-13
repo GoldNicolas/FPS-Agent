@@ -306,7 +306,7 @@ This is also better for RL. Randomized original layouts keep the agent from memo
    - **Watching a trained policy:** download the `run-<id>` release (check `SHA256SUMS`), then run the editor build as a game:
      `UnrealEditor.exe <uproject> -game -windowed -Stage=S0 -Infer -ResumeFrom=<folder> -Arenas=1 -StartDifficulty=1 -ExecCmds="fps.WatchAgent 0, fps.ShowShots 1, t.MaxFPS 60"`.
      Playback uses the fixed 60 Hz step, so `t.MaxFPS 60` keeps it at real time. The game uncaps the frame rate in code, but a console setting outranks that.
-   - **Video:** `powershell -File tools/record_policy_video.ps1 -Snapshots <folder> [-Episodes 14] [-View Agent|TopDown] [-Title "..."]`.
+   - **Video:** `powershell -File tools/record_policy_video.ps1 -Snapshots <folder> [-Episodes 14] [-View Agent|TopDown] [-Title "..."] [-Set "<same -Set as the run>"]`.
      It renders a fixed-seed `-Eval` frame by frame (`-dumpmovie`, exactly 1/60 s per frame, so the video plays in real time), then encodes it with ffmpeg into `Game/FPSAgent/Saved/Videos/`.
      - Disk: about 2 MB per 1080p frame while recording.
      - Time: capture is slow, about 1.2 s per frame on the dev laptop, so 60 s of video takes about 70 min.
