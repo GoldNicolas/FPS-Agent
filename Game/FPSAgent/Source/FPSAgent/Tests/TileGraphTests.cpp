@@ -101,4 +101,32 @@ bool FFPSTileGraphLosTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCoverFloorTest, "FPSAgent.Nav.CoverFloor",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCoverFloorTest::RunTest(const FString& Parameters)
+{
+	auto Count = [](const FMapSpec& S, TCHAR Ch)
+	{
+		int32 N = 0;
+		for (const FString& Row : S.Tiles) { for (const TCHAR C : Row) { N += C == Ch ? 1 : 0; } }
+		return N;
+	};
+	for (int32 Seed = 0; Seed < 20; ++Seed)
+	{
+		FRandomStream Rng(Seed);
+		const FMapSpec S = FPSArena::MakeCoverFloorSpec(20, 0.12f, 0.5f, Rng, TEXT("cover"));
+		TestEqual(TEXT("12% of 400 tiles are cover"), Count(S, TEXT('l')) + Count(S, TEXT('h')), 48);
+		TestEqual(TEXT("half of them low"), Count(S, TEXT('l')), 24);
+		TestEqual(TEXT("wall ring kept"), S.Tiles[0], FString::ChrN(22, TEXT('#')));
+		TestEqual(TEXT("all walkable tiles connected"), FTileGraph::Build(S).CountStronglyConnected(), 1);
+	}
+	FRandomStream A(7), B(7);
+	TestTrue(TEXT("deterministic per seed"), FPSArena::MakeCoverFloorSpec(20, 0.12f, 0.5f, A, TEXT("x")).Tiles == FPSArena::MakeCoverFloorSpec(20, 0.12f, 0.5f, B, TEXT("x")).Tiles);
+	FRandomStream Z(1);
+	TestTrue(TEXT("density 0 = the open floor"), FPSArena::MakeCoverFloorSpec(20, 0.f, 0.5f, Z, TEXT("o")).Tiles == FPSArena::MakeOpenFloorSpec(20, TEXT("o")).Tiles);
+	FRandomStream Dense(3);
+	TestEqual(TEXT("dense layouts stay connected (or fall back to open)"), FTileGraph::Build(FPSArena::MakeCoverFloorSpec(20, 0.45f, 0.5f, Dense, TEXT("d"))).CountStronglyConnected(), 1);
+	return true;
+}
+
 #endif
