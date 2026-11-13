@@ -25,10 +25,10 @@ ACombatTaskActor::ACombatTaskActor()
 	Manager = CreateDefaultSubobject<ULearningAgentsManager>(TEXT("LearningAgentsManager"));
 }
 
-FBox ACombatTaskActor::ComputeBounds(int32 ArenaCount, const FVector& Origin)
+FBox ACombatTaskActor::ComputeBounds(int32 ArenaCount, const FVector& Origin, int32 StageIndex)
 {
 	FBox Box(ForceInit);
-	const float Half = UCombatArena::FloorHalfSizeCm();
+	const float Half = UCombatArena::FloorHalfSizeCm(StageIndex);
 	for (const FVector& C : FPSReach::ArenaCenters(ArenaCount, UFPSAgentSettings::Get().Combat.ArenaSpacingCm, Origin))
 	{
 		Box += C + FVector(-Half, -Half, 0.0);
@@ -53,15 +53,16 @@ void ACombatTaskActor::BeginPlay()
 	Super::BeginPlay();
 	const FFPSRunArgs& Args = FFPSRunArgs::Get();
 	const UFPSAgentSettings& S = UFPSAgentSettings::Get();
-	const int32 StageIndex = AArenaGameMode::RequestedCombatStage();
-	if (StageIndex != 0)
+	StageIndex = AArenaGameMode::RequestedCombatStage();
+	if (StageIndex < 0 || StageIndex > 1)
 	{
-		Exit(2, FString::Printf(TEXT("stage S%d is not in this build (build A has S0 only)"), StageIndex));
+		Exit(2, FString::Printf(TEXT("stage S%d is not in this build (build B has S0 and S1)"), StageIndex));
 		return;
 	}
-	if (S.Combat.ArenaSpacingCm < 2.f * UCombatArena::FloorHalfSizeCm() + 5000.f)
+	const FCombatStageSpec& Stage = S.Curriculum.Stage(StageIndex);
+	if (S.Combat.ArenaSpacingCm < 2.f * UCombatArena::FloorHalfSizeCm(StageIndex) + 5000.f)
 	{
-		Exit(2, FString::Printf(TEXT("arenas would interact: ArenaSpacingCm %.0f < floor %.0f + 50 m (hard rule 3)"), S.Combat.ArenaSpacingCm, 2.f * UCombatArena::FloorHalfSizeCm()));
+		Exit(2, FString::Printf(TEXT("arenas would interact: ArenaSpacingCm %.0f < floor %.0f + 50 m (hard rule 3)"), S.Combat.ArenaSpacingCm, 2.f * UCombatArena::FloorHalfSizeCm(StageIndex)));
 		return;
 	}
 	bScripted = Args.bScripted;
@@ -86,7 +87,7 @@ void ACombatTaskActor::BeginPlay()
 	for (int32 i = 0; i < Centers.Num(); ++i)
 	{
 		UCombatArena* Arena = NewObject<UCombatArena>(this);
-		Arena->Build(GetWorld(), i, Centers[i], Args.Seed);
+		Arena->Build(GetWorld(), i, Centers[i], Args.Seed, StageIndex);
 		Arenas.Add(Arena);
 		FPSCurriculum::FDifficultyController D;
 		D.Init(Args.StartDifficulty);
@@ -116,7 +117,7 @@ void ACombatTaskActor::BeginPlay()
 		Config.Critic.HiddenLayerNum = Ppo.HiddenLayers;
 		Config.Critic.HiddenLayerSize = Ppo.HiddenSize;
 		// Our own timeout (Truncation) fires first; this cap only guards against a stuck episode.
-		Config.Trainer.MaxEpisodeStepNum = FMath::CeilToInt(S.Curriculum.S0.TimeLimitSeconds / DecisionSeconds) + 2;
+		Config.Trainer.MaxEpisodeStepNum = FMath::CeilToInt(Stage.TimeLimitSeconds / DecisionSeconds) + 2;
 		Config.Trainer.MaximumRecordedStepsPerIteration = FMath::Max(1, Ppo.ReplayMaxSteps);
 		Config.Trainer.MaximumRecordedEpisodesPerIteration = FMath::Max(1, Ppo.ReplayMaxEpisodes);
 		FLearningAgentsPPOTrainingSettings& T = Config.Training;
@@ -169,10 +170,10 @@ void ACombatTaskActor::BeginPlay()
 	NextDecisionTime = Now();
 	NextStatsTime = Now() + S.Combat.Ppo.StatsLogIntervalSeconds;
 	WindowWallStart = FPlatformTime::Seconds();
-	UE_LOG(LogFPSAgent, Display, TEXT("Combat: ready. stage=S0 arenas=%d mode=%s resume=%s startDifficulty=%.2f decisionsPerSecond=%.1f timeLimit=%.0fs bots=%d..%d"),
-		Arenas.Num(), bScripted ? TEXT("scripted (no policy)") : bEval ? TEXT("eval") : bInfer ? TEXT("infer") : TEXT("train (external trainer)"),
+	UE_LOG(LogFPSAgent, Display, TEXT("Combat: ready. stage=S%d arenas=%d mode=%s resume=%s startDifficulty=%.2f decisionsPerSecond=%.1f timeLimit=%.0fs bots=%d..%d agentMoves=%d"),
+		StageIndex, Arenas.Num(), bScripted ? TEXT("scripted (no policy)") : bEval ? TEXT("eval") : bInfer ? TEXT("infer") : TEXT("train (external trainer)"),
 		Args.ResumeFrom.IsEmpty() ? TEXT("(none)") : *Args.ResumeFrom, Args.StartDifficulty, 1.0 / DecisionSeconds,
-		S.Curriculum.S0.TimeLimitSeconds, S.Curriculum.S0.BotsEasy, S.Curriculum.S0.BotsHard);
+		Stage.TimeLimitSeconds, Stage.BotsEasy, Stage.BotsHard, Stage.bAgentCanMove ? 1 : 0);
 }
 
 UCombatArena* ACombatTaskActor::ArenaOf(int32 AgentId) const
@@ -186,6 +187,12 @@ void ACombatTaskActor::StartNextEpisode(int32 ArenaIndex)
 	UCombatArena* Arena = Arenas[ArenaIndex];
 	const int32 Seed = Arena->NextEpisodeSeed();
 	FRandomStream Rng(Seed);
+	if (StageIndex == 1)
+	{
+		const UFPSAgentSettings& S = UFPSAgentSettings::Get();
+		Arena->StartEpisode(FPSCurriculum::SampleS1(Rng, Difficulty[ArenaIndex].Level, /*bAllowReview=*/!bEval, S.Curriculum, S.Bots), Seed, Now());
+		return;
+	}
 	const FPSCurriculum::FS0Episode Config = FPSCurriculum::SampleS0(Rng, Difficulty[ArenaIndex].Level, /*bAllowReview=*/!bEval,
 		UFPSAgentSettings::Get().Curriculum, Arena->GetBotRadiusCm());
 	Arena->StartEpisode(Config, Seed, Now());
@@ -405,8 +412,8 @@ void ACombatTaskActor::LogStats()
 void ACombatTaskActor::FinishEval()
 {
 	const FFPSRunArgs& Args = FFPSRunArgs::Get();
-	const float Gate = UFPSAgentSettings::Get().Curriculum.S0.PromotionClearRate;
-	const FString Json = FPSCombatStats::EvalJson(EvalTotals, TEXT("S0"), Args.StartDifficulty, Args.Seed,
+	const float Gate = UFPSAgentSettings::Get().Curriculum.Stage(StageIndex).PromotionClearRate;
+	const FString Json = FPSCombatStats::EvalJson(EvalTotals, FString::Printf(TEXT("S%d"), StageIndex), Args.StartDifficulty, Args.Seed,
 		bScripted ? FString(TEXT("(scripted)")) : Args.ResumeFrom, Gate);
 	UE_LOG(LogFPSAgent, Display, TEXT("CombatEval: %s"), *Json);
 	if (!Args.EvalJson.IsEmpty())

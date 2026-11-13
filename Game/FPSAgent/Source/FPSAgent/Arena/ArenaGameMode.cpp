@@ -100,12 +100,13 @@ void AArenaGameMode::BuildCombat(UWorld* World)
 	// The combat task builds its own arenas, agents and bots. The local player only watches (spectator, no bean).
 	ArenaName = TEXT("combat");
 	bStartPlayersAsSpectators = true;
-	Bounds = ACombatTaskActor::ComputeBounds(FFPSRunArgs::Get().Arenas, FVector::ZeroVector);
+	const int32 StageIndex = FMath::Clamp(RequestedCombatStage(), 0, 1);
+	Bounds = ACombatTaskActor::ComputeBounds(FFPSRunArgs::Get().Arenas, FVector::ZeroVector, StageIndex);
 	FActorSpawnParameters Params;
 	Params.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
 	World->SpawnActor<ACombatTaskActor>(FVector::ZeroVector, FRotator::ZeroRotator, Params);
 	// Watch arena 0 (centred on the origin) from above its -X edge.
-	const float Half = UCombatArena::FloorHalfSizeCm();
+	const float Half = UCombatArena::FloorHalfSizeCm(StageIndex);
 	PlayerStart = World->SpawnActor<APlayerStart>(FVector(-Half - 1500.0, 0.0, 2500.0), FRotator(-45.0, 0.0, 0.0), Params);
 }
 

@@ -28,7 +28,7 @@ public:
 	ACombatTaskActor();
 
 	/** Box around all arenas centred on Origin's arena grid. */
-	static FBox ComputeBounds(int32 ArenaCount, const FVector& Origin);
+	static FBox ComputeBounds(int32 ArenaCount, const FVector& Origin, int32 StageIndex = 0);
 
 	/** The agent bean of arena ArenaIndex, or null (viewing: fps.WatchAgent). */
 	ABeanCharacter* GetArenaAgent(int32 ArenaIndex) const
@@ -84,6 +84,8 @@ private:
 	bool bInfer = false;
 	bool bScripted = false;
 	bool bEval = false;
+	/** Combat stage index: 0 = S0, 1 = S1 (set in BeginPlay). */
+	int32 StageIndex = 0;
 	bool bReady = false;
 	bool bExiting = false;
 	bool bCsvWarned = false;
