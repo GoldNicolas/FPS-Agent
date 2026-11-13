@@ -43,7 +43,7 @@ Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
 | `sxmq` | sxm[001-004] | 8 (A100 SXM per public docs) | 56 | unlimited | groups admins, **milab**, csdev | PriorityTier 1000. Busy (56 running, 67 pending on 2026-11-11). |
 | `kimq` (default) | sxm[003-004] | 8 | 56 | 12:00:00 | all | PriorityTier 1, so it waits behind `sxmq` on the same nodes. `DefCpuPerGPU=6`. |
 | `gpua30q` | gpu[009-010] | 6 (A30) | 56 | 1-12:00:00 | all | Both nodes drained on 2026-11-11. |
-| `gpul40q` | gpu[011-012] | 8 (L40S) | 64 | unlimited | all | gpu012 drained on 2026-11-11. |
+| `gpul40q` | gpu[011-012] | 8 (L40S) | 64 | unlimited | all | gpu012 drained on 2026-11-11. **In use since 2026-11-13** (L-008/L-009): L40S 48GB, driver 550.54.14. `gpu_check.py` passes except the cuDNN GRU tolerance, which is TF32 (5.5e-6 with TF32 off; job 152824). Shared nodes: `-c 6` + 1 GPU queued a day while `-c 4` started at once, so check with `sbatch --test-only` first. |
 
 - Slurm 21.08.8, `select/cons_tres` with **`CR_CORE`**: cores and GPUs are scheduled, **memory is not** (every node reports `RealMemory=1024000` MB, more than the public 640 GB for the A100 nodes). Still pass `--mem` in our scripts as documentation of what a job needs.
 - `DefMemPerNode=UNLIMITED`, `DefaultTime=NONE`: always pass `-t` and `--mem`.

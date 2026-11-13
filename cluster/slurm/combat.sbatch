@@ -1,22 +1,29 @@
 #!/bin/bash
-# Combat stage S0 on Cradle (request L-007; README -> "Game command-line arguments", "Game log lines to grep",
+# Combat stages S0/S1 on Cradle (requests L-007, L-009; README -> "Game command-line arguments", "Game log lines to grep",
 # "Game exit codes"). Paths per D-021 (docs/cradle.md -> "Our paths"): everything under ~/beanRant.
-#   MODE=smoke  L-007 (1), all in one job: train 3 batches; resume those snapshots for 2 batches; resume them
-#               with -Eval -EvalEpisodes=20; then check that -Stage=S1 and a bad -Set exit with code 2.
+# STAGE=S0|S1 (default S0) picks the combat stage for every mode; BUILD_SHA picks the build (S1 needs 0eef702+).
+#   MODE=smoke  L-007 (1) / L-009 (1), all in one job: train 3 batches; resume those snapshots for 2 batches; resume
+#               them with -Eval -EvalEpisodes=20; then check that -Stage=S2 and a bad -Set exit with code 2.
+#               Optional: SMOKE_LOAD_SNAP=<dir> (a snapshot of the same network, e.g. the promoted S0 one) must load
+#               into STAGE (-Eval, 20 episodes, exit 0); SMOKE_OTHER_SNAP=<dir> (another network, e.g. Spike A's)
+#               must exit with code 2 and log "doesn't match this build's network" (build-0eef702+).
 #   MODE=train  external trainer (--batch-size BATCH_SIZE, default NUM_GAMES) + NUM_GAMES games x ARENAS arenas,
 #               BATCHES experience batches. Chainable: give every job of a chain the same RUN_ID. Each job works
 #               in $RUN/job_<jobid>/, the games append to $RUN/stats_<i>.csv, and the job adds one line to
 #               $RUN/chain.txt (snapshots, last mean level=, promotion trigger). Without RESUME_FROM /
 #               START_DIFFICULTY a job continues from the last chain.txt line. After the promotion trigger
-#               (every game's last PROMOTE_WINDOWS windows have mean level >= PROMOTE_LEVEL) or a failed job,
-#               later jobs of the chain exit at once.
+#               (mean level >= PROMOTE_LEVEL over the last PROMOTE_WINDOWS windows of all games, and the pooled
+#               clearTop over the same windows >= PROMOTE_CLEARTOP with >= PROMOTE_MIN_TOP gate-level episodes;
+#               D-031 (6), (11)) or a failed job, later jobs of the chain exit at once. Start a new RUN_ID per run:
+#               build-A CSVs have no clearTop columns and never promote.
 #   MODE=eval   one game, no trainer: -Eval -EvalEpisodes=EVAL_EPISODES -StartDifficulty=START_DIFFICULTY
 #               -Seed=SEED -Arenas=ARENAS from RESUME_FROM, or the -Scripted reference with SCRIPTED=1.
 #   MODE=probe  -Stage=SpikeC mechanics probe (C-006).
 #
 #   mkdir -p ~/beanRant/logs
 #   S=~/beanRant/FPS-Agent/cluster/slurm/combat.sbatch
-#   sbatch -t 30 --export=ALL,MODE=smoke $S
+#   Partition: always -p <partition> (gpuq is off-limits); e.g. -p gpul40q.
+#   sbatch -p gpul40q -t 30 --export=ALL,MODE=smoke,STAGE=S1 $S
 #   J=$(sbatch --parsable --export=ALL,MODE=train,NUM_GAMES=4,ARENAS=32,BATCHES=300 $S)          # first job: S0-<date>-$J
 #   sbatch --dependency=afterany:$J --export=ALL,MODE=train,RUN_ID=S0-<date>-$J,NUM_GAMES=4,ARENAS=32,BATCHES=300 $S  # next ones
 #   sbatch --gres=none -c 4 -t 30 --export=ALL,MODE=eval,RESUME_FROM=<dir>,START_DIFFICULTY=1,SEED=1000 $S
@@ -35,7 +42,8 @@ set -uo pipefail
 [ "${SLURM_JOB_PARTITION:-}" = gpuq ] && { echo "gpuq is off-limits until further notice (docs/cradle.md); resubmit with -p <other partition>"; exit 1; }
 
 MODE=${MODE:-smoke}
-BUILD_SHA=${BUILD_SHA:-10520b5}
+STAGE=${STAGE:-S0}                # combat stage for train, smoke and eval
+BUILD_SHA=${BUILD_SHA:-0eef702}   # build B (S0 unchanged + S1); L-008 pins 10520b5
 NUM_GAMES=${NUM_GAMES:-2}
 ARENAS=${ARENAS:-16}
 BATCH_SIZE=${BATCH_SIZE:-$NUM_GAMES}
@@ -49,6 +57,10 @@ SCRIPTED=${SCRIPTED:-0}
 EVAL_LIMIT=${EVAL_LIMIT:-1800}    # eval: stop the game after this many seconds
 PROMOTE_LEVEL=${PROMOTE_LEVEL:-0.9}
 PROMOTE_WINDOWS=${PROMOTE_WINDOWS:-10}
+PROMOTE_CLEARTOP=${PROMOTE_CLEARTOP:-0.70}
+PROMOTE_MIN_TOP=${PROMOTE_MIN_TOP:-50}   # fewer gate-level episodes than this: don't call it
+SMOKE_LOAD_SNAP=${SMOKE_LOAD_SNAP:-}
+SMOKE_OTHER_SNAP=${SMOKE_OTHER_SNAP:-}
 GAME_STDOUT=${GAME_STDOUT:-0}     # 1: keep each game's stdout (it repeats the log) in game_<i>.stdout
 GZIP_LOGS=${GZIP_LOGS:-1}         # train: gzip the game logs at the end of the job (after the summary)
 LOGCMDS=${LOGCMDS:-}              # train: passed as -LogCmds=..., e.g. "LogLearning Warning" hides Learning Agents' Display lines
@@ -58,9 +70,9 @@ BEAN=$HOME/beanRant
 REPO=$BEAN/FPS-Agent
 BUILD=$BEAN/builds/$BUILD_SHA/Linux
 case $MODE in
-  train) RUN_ID=${RUN_ID:-S0-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;   # docs/runs/README.md convention
-  eval)  RUN_ID=${RUN_ID:-s0eval-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
-  *)     RUN_ID=${RUN_ID:-s0$MODE-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
+  train) RUN_ID=${RUN_ID:-$STAGE-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;   # docs/runs/README.md convention
+  eval)  RUN_ID=${RUN_ID:-${STAGE,,}eval-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
+  *)     RUN_ID=${RUN_ID:-${STAGE,,}$MODE-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
 esac
 RUN=$BEAN/runs/$RUN_ID
 GAME_HOME=$RUN/home               # the engine writes its user files here, not in ~ (D-021)
@@ -76,7 +88,7 @@ PORT0=$((40000 + SLURM_JOB_ID % 20000))
 
 T0=$(date +%s)
 {
-  echo "run_id=$RUN_ID mode=$MODE job=$SLURM_JOB_ID host=$(hostname) start=$(date -Is)"
+  echo "run_id=$RUN_ID mode=$MODE stage=$STAGE partition=${SLURM_JOB_PARTITION:-?} job=$SLURM_JOB_ID host=$(hostname) start=$(date -Is)"
   echo "build=$BUILD_SHA repo_commit=$(git -C "$REPO" rev-parse --short HEAD) games=$NUM_GAMES arenas=$ARENAS batch_size=$BATCH_SIZE"
   echo "batches=$BATCHES resume_from=${RESUME_FROM:-auto} start_difficulty=${START_DIFFICULTY:-auto} set=${SET:-none}"
   echo "eval_episodes=$EVAL_EPISODES seed=$SEED scripted=$SCRIPTED cpus=${SLURM_CPUS_PER_TASK:-?} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-none}"
@@ -142,7 +154,7 @@ train_step() {
   local GAMES=() i OUT
   for i in $(seq 0 $((NUM_GAMES - 1))); do
     OUT=/dev/null; [ "$GAME_STDOUT" = 1 ] && OUT=$D/game_$i.stdout
-    HOME=$GAME_HOME "$BUILD/FPSAgent.sh" "${BASE[@]}" -Stage=S0 -Arenas="$ARENAS" -Seed=$((SLURM_JOB_ID * 1000 + i)) \
+    HOME=$GAME_HOME "$BUILD/FPSAgent.sh" "${BASE[@]}" -Stage="$STAGE" -Arenas="$ARENAS" -Seed=$((SLURM_JOB_ID * 1000 + i)) \
       -Batches="$B" ${R:+-ResumeFrom="$R"} -StartDifficulty="$L" -StatsCsv="${CSVP}_$i.csv" "${SETARG[@]}" "${LOGARG[@]}" \
       $(TRAINER_ARGS "$P") -abslog="$D/game_$i.log" > "$OUT" 2>&1 &
     GAMES+=($!)
@@ -173,12 +185,17 @@ smoke)
   # (b) resume in training, 2 batches, at the last mean level
   [ "$STOPPED" = 0 ] && train_step "$RUN/b_resume2" 2 "$A_SNAP" "$A_LEVEL" $((PORT0 + 1)) "$RUN/b_resume2/stats"
   # (c) resume with -Eval, 20 episodes (no trainer)
-  [ "$STOPPED" = 0 ] && single "$RUN/c_eval20" 600 -Stage=S0 -Arenas="$ARENAS" -Seed="$SEED" -Eval -EvalEpisodes=20 \
+  [ "$STOPPED" = 0 ] && single "$RUN/c_eval20" 600 -Stage="$STAGE" -Arenas="$ARENAS" -Seed="$SEED" -Eval -EvalEpisodes=20 \
     -ResumeFrom="$A_SNAP" -StartDifficulty="$A_LEVEL" -EvalJson="$RUN/c_eval20/eval.json"
   # (d) bad arguments must exit with code 2 (a game that tried the trainer instead would exit 1)
-  [ "$STOPPED" = 0 ] && single "$RUN/d_stage_s1" 180 -Stage=S1 -Arenas=2 -Seed=1 $(TRAINER_ARGS $((PORT0 + 2)))
-  [ "$STOPPED" = 0 ] && single "$RUN/e_bad_set" 180 -Stage=S0 -Arenas=2 -Seed=1 -Set=Combat.Reward.Nope=1 $(TRAINER_ARGS $((PORT0 + 3)))
-  for D in a_train3 b_resume2 c_eval20 d_stage_s1 e_bad_set; do [ -d "$RUN/$D" ] && "${REPORT[@]}" step "$RUN/$D"; done | tee "$RUN/summary.md"
+  [ "$STOPPED" = 0 ] && single "$RUN/d_stage_s2" 180 -Stage=S2 -Arenas=2 -Seed=1 $(TRAINER_ARGS $((PORT0 + 2)))
+  [ "$STOPPED" = 0 ] && single "$RUN/e_bad_set" 180 -Stage="$STAGE" -Arenas=2 -Seed=1 -Set=Combat.Reward.Nope=1 $(TRAINER_ARGS $((PORT0 + 3)))
+  # (f) a snapshot of the same network loads into this stage; (g) another network exits with code 2
+  [ "$STOPPED" = 0 ] && [ -n "$SMOKE_LOAD_SNAP" ] && single "$RUN/f_load_snap" 600 -Stage="$STAGE" -Arenas="$ARENAS" -Seed="$SEED" \
+    -Eval -EvalEpisodes=20 -ResumeFrom="$SMOKE_LOAD_SNAP" -EvalJson="$RUN/f_load_snap/eval.json"
+  [ "$STOPPED" = 0 ] && [ -n "$SMOKE_OTHER_SNAP" ] && single "$RUN/g_other_net" 180 -Stage="$STAGE" -Arenas=2 -Seed=1 \
+    -Eval -EvalEpisodes=2 -ResumeFrom="$SMOKE_OTHER_SNAP"
+  for D in a_train3 b_resume2 c_eval20 d_stage_s2 e_bad_set f_load_snap g_other_net; do [ -d "$RUN/$D" ] && "${REPORT[@]}" step "$RUN/$D"; done | tee "$RUN/summary.md"
   ;;
 train)
   JOB=$RUN/job_$SLURM_JOB_ID
@@ -195,8 +212,8 @@ train)
   OK=1
   [ -n "$SNAP" ] || OK=0
   [ "$STOPPED" = 1 ] || for rc in "${GAME_RCS[@]}"; do [ "$rc" = 0 ] || OK=0; done
-  read -r END_LEVEL PROMOTED WINDOWS <<< "$("${REPORT[@]}" chainstate "$RUN" "$PROMOTE_LEVEL" "$PROMOTE_WINDOWS")"
-  echo "job=$SLURM_JOB_ID ok=$OK batches=$BATCHES iters=$(grep -c 'Iter:' "$JOB/trainer.log") start_difficulty=$START_DIFFICULTY end_level=$END_LEVEL promoted=$PROMOTED windows=$WINDOWS stopped=$STOPPED games=$(IFS=,; echo "${GAME_RCS[*]}") snapshots=${SNAP:-none} resume_from=${RESUME_FROM:-none} end=$(date -Is)" \
+  read -r END_LEVEL PROMOTED WINDOWS CLEARTOP TOPN <<< "$("${REPORT[@]}" chainstate "$RUN" "$PROMOTE_LEVEL" "$PROMOTE_WINDOWS" "$PROMOTE_CLEARTOP" "$PROMOTE_MIN_TOP")"
+  echo "job=$SLURM_JOB_ID ok=$OK batches=$BATCHES iters=$(grep -c 'Iter:' "$JOB/trainer.log") start_difficulty=$START_DIFFICULTY end_level=$END_LEVEL promoted=$PROMOTED windows=$WINDOWS cleartop=$CLEARTOP top_n=$TOPN stopped=$STOPPED games=$(IFS=,; echo "${GAME_RCS[*]}") snapshots=${SNAP:-none} resume_from=${RESUME_FROM:-none} end=$(date -Is)" \
     | tee -a "$RUN/chain.txt"
   "${REPORT[@]}" step "$JOB" | tee "$JOB/summary.md"
   echo "game log sizes: $(du -ch "$JOB"/game_*.log 2>/dev/null | tail -1 | cut -f1)"
@@ -206,8 +223,8 @@ eval)
   if [ "$SCRIPTED" = 1 ]; then WHO=(-Scripted); else
     [ -n "$RESUME_FROM" ] || { echo "MODE=eval needs RESUME_FROM (or SCRIPTED=1)"; exit 2; }
     WHO=(-ResumeFrom="$RESUME_FROM"); fi
-  D=$RUN/eval_$([ "$SCRIPTED" = 1 ] && echo scripted || echo policy)_l${START_DIFFICULTY:-0}_s${SEED}_k${ARENAS}_j$SLURM_JOB_ID   # job id: a rerun never reuses a folder
-  single "$D" "$EVAL_LIMIT" -Stage=S0 -Arenas="$ARENAS" -Seed="$SEED" -Eval -EvalEpisodes="$EVAL_EPISODES" \
+  D=$RUN/eval_${STAGE,,}_$([ "$SCRIPTED" = 1 ] && echo scripted || echo policy)_l${START_DIFFICULTY:-0}_s${SEED}_k${ARENAS}_j$SLURM_JOB_ID   # job id: a rerun never reuses a folder
+  single "$D" "$EVAL_LIMIT" -Stage="$STAGE" -Arenas="$ARENAS" -Seed="$SEED" -Eval -EvalEpisodes="$EVAL_EPISODES" \
     -StartDifficulty="${START_DIFFICULTY:-0}" "${WHO[@]}" "${SETARG[@]}" -EvalJson="$D/eval.json"
   "${REPORT[@]}" step "$D" | tee "$D/summary.md"
   ;;

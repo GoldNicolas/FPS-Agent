@@ -6,9 +6,14 @@ Usage (la-train python; -I keeps the run folder off the import path):
     combat_report.py progress <run> [B]             timeline of <run>/stats_*.csv in blocks of B windows (default 30):
                                                     episodes, clear/death/timeout rates, return, kills/ep, acc, hs,
                                                     clear time, and the mean level (episode-weighted over games)
-    combat_report.py chainstate <run> <L> <W>       "<end_level> <promoted 0|1> <windows>" for a chain's
-                                                    <run>/stats_*.csv: promoted = every game's last W windows
-                                                    have levelMean >= L (spec section 5: mean L >= 0.9 for 10 windows)
+    combat_report.py chainstate <run> <L> <W> [C] [M]
+                                                    "<end_level> <promoted 0|1> <windows> <clearTop> <topN>" for a
+                                                    chain's <run>/stats_*.csv. Promoted (D-031 (6), (11); L-009 (0)) =
+                                                    mean levelMean >= L over the last W windows of all games AND the
+                                                    pooled clearTop over the same windows and games,
+                                                    sum(clearRateTop * episodesTop) / sum(episodesTop), >= C (0.70),
+                                                    with at least M (50) gate-level episodes. CSVs without clearTop
+                                                    columns (build A) never promote; clearTop prints as -1.
 Log formats: README -> "Game log lines to grep"; CSV columns: Learning/CombatStats.cpp (CsvHeader).
 """
 import csv
@@ -23,7 +28,8 @@ import sys
 PREFIX = re.compile(r"^\[(\d{4})\.(\d{2})\.(\d{2})-(\d{2})\.(\d{2})\.(\d{2}):(\d{3})\]")
 STATS = re.compile(r"CombatStats: gameTime=(\d+)s episodes=(\d+) clear=([\d.]+)% died=([\d.]+)% timeout=([\d.]+)% "
                    r"avgReturn=(-?[\d.]+) kills/ep=([\d.]+) acc=([\d.]+)% hs=([\d.]+)% clearTime=([\d.]+)s "
-                   r"level=([\d.]+)\(([\d.]+)\.\.([\d.]+)\) decisions/s\(wall\)=(\d+)")
+                   r"level=([\d.]+)\(([\d.]+)\.\.([\d.]+)\) decisions/s\(wall\)=(\d+)"
+                   r"(?: clearTop=([\d.]+)%\(n=(\d+)\) botSpeed=(\d+)cm/s)?")
 ITER = re.compile(r"^(\d+\.\d+) .*Iter:\s+(\d+) \| Avg Rew: (\S+) \| Avg Rew Sum:\s+(\S+) \| Avg Return: (\S+) \| "
                   r"Avg Episode Len:\s+(\S+) \| Batch Size: (\d+)")
 PROFILE = re.compile(r"Profile\| (.+?)\s+(\d+)ms")
@@ -60,15 +66,27 @@ def cmd_level(folder):
     print(f"{statistics.fmean(float(r[-1]['levelMean']) for _, r in files):.3f}" if files else "0")
 
 
-def cmd_chainstate(run, level, windows):
+def pooled_top(rows):
+    """-> (pooled clearTop, gate-level episodes) over CSV rows; (None, 0) for build-A CSVs without the columns"""
+    if not rows or "clearRateTop" not in rows[0]:
+        return None, 0
+    n = sum(int(x["episodesTop"] or 0) for x in rows)
+    clears = sum(float(x["clearRateTop"] or 0) * int(x["episodesTop"] or 0) for x in rows)
+    return (clears / n if n else 0.0), n
+
+
+def cmd_chainstate(run, level, windows, clear_top=0.70, min_top=50):
     files = last_levels(run)
     if not files:
-        print("0 0 0")
+        print("0 0 0 -1 0")
         return
     end = statistics.fmean(float(r[-1]["levelMean"]) for _, r in files)
     n = min(len(r) for _, r in files)
-    promoted = n >= windows and all(float(x["levelMean"]) >= level for _, r in files for x in r[-windows:])
-    print(f"{end:.3f} {int(promoted)} {n}")
+    last = [x for _, r in files for x in r[-windows:]]
+    top, top_n = pooled_top(last)
+    promoted = (n >= windows and statistics.fmean(float(x["levelMean"]) for x in last) >= level
+                and top is not None and top_n >= min_top and top >= clear_top)
+    print(f"{end:.3f} {int(promoted)} {n} {-1 if top is None else round(top, 3)} {top_n}")
 
 
 def cmd_progress(run, block):
@@ -78,8 +96,8 @@ def cmd_progress(run, block):
         return
     n = min(len(r) for _, r in files)
     print(f"{len(files)} games, {n} windows each (10 s of game time per window; gameTime restarts in each chained job)\n")
-    print("| windows | episodes | clear % | died % | timeout % | avg return | kills/ep | acc % | hs % | clear s | level mean (min..max) | decisions/s per game |")
-    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|")
+    print("| windows | episodes | clear % | died % | timeout % | avg return | kills/ep | acc % | hs % | clear s | level mean (min..max) | clearTop % (n) | botSpeed cm/s | decisions/s per game |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|")
     for a in range(0, n, block):
         rows = [x for _, r in files for x in r[a:min(a + block, n)]]
         ep = sum(int(x["episodes"]) for x in rows)
@@ -91,9 +109,12 @@ def cmd_progress(run, block):
         lo = min(float(x["levelMin"]) for x in last)
         hi = max(float(x["levelMax"]) for x in last)
         dps = statistics.fmean(float(x["decisionsPerSecond"]) for x in rows)
+        top, top_n = pooled_top(rows)
+        topc = "n/a" if top is None else f"{100 * top:.1f} ({top_n})"
+        bs = f"{w('botSpeed'):.0f}" if "botSpeed" in rows[0] and ep else "n/a"
         print(f"| {a + 1}-{min(a + block, n)} | {ep} | {100 * w('clearRate'):.1f} | {100 * w('deathRate'):.1f} | {100 * w('timeoutRate'):.1f} | "
               f"{w('avgReturn'):.3f} | {w('killsPerEpisode'):.2f} | {100 * w('accuracy'):.1f} | {100 * w('headshotRate'):.1f} | {cs:.1f} | "
-              f"{lm:.2f} ({lo:.2f}..{hi:.2f}) | {dps:,.0f} |")
+              f"{lm:.2f} ({lo:.2f}..{hi:.2f}) | {topc} | {bs} | {dps:,.0f} |")
 
 
 def game_log(path):
@@ -127,7 +148,8 @@ def game_log(path):
 def short_stats(m):
     g = m.groups()
     return (f"t={g[0]}s ep={g[1]} clear={g[2]}% died={g[3]}% timeout={g[4]}% ret={g[5]} kills/ep={g[6]} "
-            f"acc={g[7]}% hs={g[8]}% clearTime={g[9]}s level={g[10]}({g[11]}..{g[12]}) dec/s={g[13]}")
+            f"acc={g[7]}% hs={g[8]}% clearTime={g[9]}s level={g[10]}({g[11]}..{g[12]}) dec/s={g[13]}"
+            + (f" clearTop={g[14]}%(n={g[15]}) botSpeed={g[16]}cm/s" if g[14] is not None else ""))
 
 
 def trainer_log(path):
@@ -170,6 +192,9 @@ def cmd_step(d):
               f"`Resetting Agents` x {g['resets']:,}, warnings {len(g['warn'])}, errors {len(g['err'])}, CombatStats x {len(g['stats'])}")
         for k in g["keys"]:
             print(f"  - `{k[:400]}`")
+        bsp = [int(m.group(17)) for m in g["stats"] if m.group(17) is not None]
+        if bsp:
+            print(f"  - botSpeed over {len(bsp)} stats lines: min {min(bsp)}, max {max(bsp)} cm/s, {sum(1 for v in bsp if v > 0)} lines > 0")
         if g["stats"]:
             print(f"  - first stats: `{short_stats(g['stats'][0])}`")
             if len(g["stats"]) > 1:
@@ -222,8 +247,8 @@ def main(argv):
         cmd_level(os.path.expanduser(argv[1]))
     elif len(argv) in (2, 3) and argv[0] == "progress":
         cmd_progress(os.path.expanduser(argv[1]), int(argv[2]) if len(argv) == 3 else 30)
-    elif len(argv) == 4 and argv[0] == "chainstate":
-        cmd_chainstate(os.path.expanduser(argv[1]), float(argv[2]), int(argv[3]))
+    elif len(argv) in (4, 5, 6) and argv[0] == "chainstate":
+        cmd_chainstate(os.path.expanduser(argv[1]), float(argv[2]), int(argv[3]), *(float(a) for a in argv[4:5]), *(int(a) for a in argv[5:6]))
     else:
         print(__doc__)
         return 2
