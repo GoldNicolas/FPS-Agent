@@ -33,6 +33,8 @@ which apptainer singularity 2>/dev/null
 ```
 
 ## Partitions (measured: `sinfo`, `scontrol show partition`, 2026-11-11)
+> **2026-11-13 (user): no jobs on `gpuq` until further notice.** The sbatch scripts no longer name a partition (pass `-p <partition>`), and they exit at once if a job lands on `gpuq`. Which partition to use instead is still to be decided with the user.
+
 Our user is in group `milab`, which unlocks `gpuq` and `sxmq`.
 
 | Partition | Nodes | GPUs/node | Cores/node | MaxTime | Who may use it | Notes |

@@ -27,13 +27,14 @@
 #   sbatch -t 30 --gres=none --export=ALL,STAGE=S0,BUILD_SHA=10520b5,MODE=sim,RESUME_FROM=<dir>,CONFIGS="1x32@0 1x32@1" $S
 #   sbatch -t 120 --gres=gpu:1 -c 48 --export=ALL,STAGE=S0,BUILD_SHA=10520b5,MODE=train,ARENAS=32,CONFIGS="4x4 8x8" $S
 #SBATCH --job-name=spikeB
-#SBATCH -p gpuq
+# Partition: pass -p <partition> to sbatch (docs/cradle.md). gpuq is off-limits until further notice (user, 2026-11-13).
 #SBATCH -N 1
 #SBATCH --cpus-per-task=32
 #SBATCH --mem=64G                 # not enforced (CR_CORE); documents the need
 #SBATCH --time=01:00:00
 #SBATCH --output=/home/%u/beanRant/logs/%x-%j.out
 set -uo pipefail
+[ "${SLURM_JOB_PARTITION:-}" = gpuq ] && { echo "gpuq is off-limits until further notice (docs/cradle.md); resubmit with -p <other partition>"; exit 1; }
 
 MODE=${MODE:-sim}
 STAGE=${STAGE:-SpikeA}            # SpikeA or S0

@@ -2,7 +2,7 @@
 
 Run inside a GPU job with la-train's python, called by its full path (on this account `conda activate`
 leaves another env's bin first on PATH, docs/cradle.md):
-    srun -p gpuq --gres=gpu:1 -c 4 --mem=16G -t 10 ~/beanRant/envs/la-train/bin/python -s cluster/scripts/gpu_check.py
+    srun -p <partition> --gres=gpu:1 -c 4 --mem=16G -t 10 ~/beanRant/envs/la-train/bin/python -s cluster/scripts/gpu_check.py
 Exits 1 if any check fails.
 """
 import os

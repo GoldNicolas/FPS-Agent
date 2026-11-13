@@ -9,13 +9,14 @@
 #   mkdir -p ~/beanRant/logs
 #   sbatch ~/beanRant/FPS-Agent/cluster/slurm/spikeC.sbatch
 #SBATCH --job-name=spikeC
-#SBATCH -p gpuq
+# Partition: pass -p <partition> to sbatch (docs/cradle.md). gpuq is off-limits until further notice (user, 2026-11-13).
 #SBATCH -N 1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=16G                 # not enforced (CR_CORE); documents the need
 #SBATCH --time=00:20:00
 #SBATCH --output=/home/%u/beanRant/logs/%x-%j.out
 set -uo pipefail
+[ "${SLURM_JOB_PARTITION:-}" = gpuq ] && { echo "gpuq is off-limits until further notice (docs/cradle.md); resubmit with -p <other partition>"; exit 1; }
 
 BUILD_SHA=${BUILD_SHA:-07eac52}
 PROCS=${PROCS:-24}

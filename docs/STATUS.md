@@ -37,6 +37,7 @@ _Last updated: 2026-11-13 by CLUSTER_
     - Default job (D-027): 4 games × 32 arenas, `--batch-size 4`, 8 cores, 1 GPU.
     - Trainer and settings asks: C-007.
   - **Spike D: on hold** (user, 2026-11-12).
+  - **`gpuq` is off-limits until further notice** (user, 2026-11-13). The scripts now take the partition from `sbatch -p` and refuse `gpuq` ([`cradle.md`](cradle.md)).
   - **L-007 (combat build A, `build-10520b5`): done (2026-11-13).** (1) Smoke **PASS** (job 152030): training, resume, `-Eval` and exit code 2 all work on Linux. The trainer is the bottleneck (about 18 s per batch at 2 × 16). (2) Spike B on combat **done**: about 19 s per batch at 4 × 32, set by the trainer (`PPO train` 11.5 s fixed); default D-030 = D-027. (3) S0 training: the promotion trigger was reached in one 300-batch job (152039). (4) Gate: attempt 1 67.0% (fail); after 300 more batches, **98.5% (pass)**, seed 2000 98.0%, scripted 100%. **S0 promoted:** Release [`run-S0-20261112-152039`](https://github.com/GoldNicolas/FPS-Agent/releases/tag/run-S0-20261112-152039), [run report](runs/S0-20261112-152039.md). Script: `cluster/slurm/combat.sbatch` (`MODE=smoke|train|eval|probe`; `train` chains jobs through `chain.txt`).
   - Scripts: `spikeA.sbatch` takes `BATCHES=`, and its playback mode now waits for the engine to exit (spike A finding 5, corrected). New: `spikeB.sbatch`, `spikeC.sbatch`, and `cluster/scripts/spike{B,C}_*.py`.
   - Paths (D-021): everything on Cradle lives under `~/beanRant/`; see cradle.md → *Our paths*.

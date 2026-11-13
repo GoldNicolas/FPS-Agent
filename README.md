@@ -537,11 +537,11 @@ These are the official Learning Agents scale-out flags from Epic's *Scaling Out 
 #!/bin/bash
 #SBATCH --job-name=fpsagent-S0
 #SBATCH -N 1
-#SBATCH -p gpuq                     # docs/cradle.md
+#SBATCH -p <partition>              # docs/cradle.md (gpuq off-limits since 2026-11-13)
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8           # 4 games: ~2 cores in training, ~6 at full speed (Spike B, D-027/D-030)
 #SBATCH --mem=<GB>G                 # not enforced (CR_CORE), but documents the need
-#SBATCH --time=<hh:mm:ss>           # always set: gpuq has no time limit
+#SBATCH --time=<hh:mm:ss>           # always set one
 #SBATCH --signal=B:USR1@300         # warning before walltime, so we can stop cleanly
 #SBATCH --output=/home/%u/beanRant/logs/%x-%j.out   # #SBATCH lines don't expand ~
 set -euo pipefail

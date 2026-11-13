@@ -23,15 +23,16 @@
 #   sbatch --gres=none -c 4 -t 30 --export=ALL,MODE=eval,SCRIPTED=1,START_DIFFICULTY=1,SEED=1000 $S
 #   sbatch --gres=none -c 2 -t 10 --export=ALL,MODE=probe $S
 #SBATCH --job-name=combat
-#SBATCH -p gpuq
+# Partition: pass -p <partition> to sbatch (docs/cradle.md). gpuq is off-limits until further notice (user, 2026-11-13).
 #SBATCH -N 1
 #SBATCH --gres=gpu:1
 #SBATCH --cpus-per-task=8
 #SBATCH --mem=32G                 # not enforced (CR_CORE); documents the need
-#SBATCH --time=01:00:00           # gpuq has no time limit: always set one
+#SBATCH --time=01:00:00           # always set a time limit
 #SBATCH --signal=B:USR1@300       # 5 min warning before the time limit: stop the games, keep the snapshots
 #SBATCH --output=/home/%u/beanRant/logs/%x-%j.out
 set -uo pipefail
+[ "${SLURM_JOB_PARTITION:-}" = gpuq ] && { echo "gpuq is off-limits until further notice (docs/cradle.md); resubmit with -p <other partition>"; exit 1; }
 
 MODE=${MODE:-smoke}
 BUILD_SHA=${BUILD_SHA:-10520b5}
