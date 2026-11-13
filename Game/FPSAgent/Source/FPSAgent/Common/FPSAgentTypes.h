@@ -309,7 +309,7 @@ struct FCombatStageSpec
 	/** Cover tiles as a fraction of the interior floor (spec §5, S1: 0 -> "medium"; verify in S1 training). S0: none. */
 	UPROPERTY(EditAnywhere, Category="Stage") float CoverDensityEasy = 0.f;
 	UPROPERTY(EditAnywhere, Category="Stage") float CoverDensityHard = 0.f;
-	/** Share of the cover tiles that are low (120 cm, crouch to hide); the rest are high (250 cm). */
+	/** Share of the cover tiles that are low (FPSMapFormat::LowCoverCm, crouch to hide); the rest are high (HighCoverCm). Starting guess (D-031); verify in S1 training. */
 	UPROPERTY(EditAnywhere, Category="Stage") float LowCoverFraction = 0.5f;
 	/** Bot movement speed as a fraction of the run speed (spec §5, S1: 60% -> 100%). */
 	UPROPERTY(EditAnywhere, Category="Stage") float BotSpeedScaleEasy = 1.f;
@@ -337,12 +337,19 @@ inline FCombatStageSpec MakeS1StageSpec()
 	S.BehaviourMixEasy.Peek = 1.f;
 	S.BehaviourMixEasy.Crouch = 1.f;
 	S.BehaviourMixHard = S.BehaviourMixEasy;
+	// Mix weights: spec §5 names the behaviours, not their shares. Starting guess (D-031); verify in S1 training.
 	S.BehaviourMixHard.Patrol = 1.5f;
 	S.BehaviourMixHard.Explore = 1.5f;
 	return S;
 }
 
-/** Scripted-bot senses and behaviour tuning (spec §4). The senses use the same rules as the agent's (hard rule 4, D-024). */
+/**
+ * Scripted-bot senses and behaviour tuning (spec §4). The senses use the same rules as the agent's (hard rule 4, D-024).
+ * Sources: the view cone, memory and hearing radii come from spec §4 (as noted per field). Every other value here is
+ * a starting guess (D-031), with no external source: the hearing noise, the footstep cadence and the running threshold,
+ * and all Behaviour timings, widths, counts and path-following tolerances. Verify them in S1 training, from the
+ * -Scripted video and the CombatStats.
+ */
 USTRUCT(BlueprintType)
 struct FBotBehaviourSettings
 {
@@ -356,11 +363,11 @@ struct FBotBehaviourSettings
 	/** Gunshots are heard within 40 m and running footsteps within 15 m; walking and crouching are silent (spec §4; verify). */
 	UPROPERTY(EditAnywhere, Category="Senses") float GunshotHearingCm = 4000.f;
 	UPROPERTY(EditAnywhere, Category="Senses") float FootstepHearingCm = 1500.f;
-	/** A heard sound gives its position with this much seeded noise (radius). */
+	/** A heard sound gives its position with this much seeded noise (radius; verify). */
 	UPROPERTY(EditAnywhere, Category="Senses") float HearingNoiseCm = 200.f;
-	/** A running bean makes one footstep sound event per this many seconds. */
+	/** A running bean makes one footstep sound event per this many seconds (about a running stride; verify). */
 	UPROPERTY(EditAnywhere, Category="Senses") float FootstepIntervalSeconds = 0.35f;
-	/** "Running" = faster than WalkSpeed x this, while not walking and not crouched. */
+	/** "Running" = faster than WalkSpeed x this, while not walking and not crouched (verify). */
 	UPROPERTY(EditAnywhere, Category="Senses") float SilentSpeedFraction = 1.05f;
 	/** The agent keeps a heard enemy sound in its observation this long (D-031). */
 	UPROPERTY(EditAnywhere, Category="Senses") float SoundMemorySeconds = 1.f;
