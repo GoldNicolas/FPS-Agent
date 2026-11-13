@@ -24,6 +24,12 @@ _Last updated: 2026-11-13 by LOCAL_
   - **2026-11-13: next steps (user's go).**
     - **L-008 for CLUSTER:** S0 *with agent movement* on the current build, through `-Set`. It's an interim step: S1 needs build B.
     - **LOCAL:** writes the build B (S1 "Movers") plan, then builds it.
+      - **Plan committed (2026-11-13):** [`superpowers/plans/2026-11-13-combat-build-b-s1.md`](superpowers/plans/2026-11-13-combat-build-b-s1.md). It has 13 tasks, tests first:
+        - tile pathfinding and a cover generator;
+        - bot senses, hearing and behaviours (strafe, peek, crouch, patrol, explore, investigate);
+        - the S1 sampler and arena, and the `-Scripted` S1 reference;
+        - fixes: `clearTop` for a gate-level trigger, a snapshot shape check, crouch on teleport.
+      - Design rulings: D-031. Ships as a new build with request L-009.
     - **Local check of the movement path** (S0 snapshot, movement on, `-Infer`, 4 arenas, 100 s):
       - It runs clean, and the `-Set` overrides and the 30 s limit apply.
       - The S0 policy drops to about 50% clear and 7–23% accuracy at level 1, because it never learned to stop moving to shoot. That's what L-008 trains.
