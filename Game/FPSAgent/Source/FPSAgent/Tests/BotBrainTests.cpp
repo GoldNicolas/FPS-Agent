@@ -102,15 +102,18 @@ bool FFPSBotBrainPeekTest::RunTest(const FString& Parameters)
 	FBotBrain Peek;
 	Peek.Start(S, Map, G, 4, Hidden, 0.0, B);
 	FSim P{ Hidden };
-	double OutAt = -1.0, BackAt = -1.0;
-	for (int32 Step = 0; Step < 60 * 10 && BackAt < 0.0; ++Step)
+	double OutAt = -1.0, LeftAt = -1.0, BackAt = -1.0;
+	for (int32 Step = 0; Step < 60 * 12 && BackAt < 0.0; ++Step)
 	{
 		P.Run(Peek, Map, 1.f / 60.f, 300.f, B);
-		if (OutAt < 0.0 && FVector2D::Distance(P.Pos, Exposed) <= B.WaypointToleranceCm) { OutAt = P.Now; }
-		if (OutAt >= 0.0 && FVector2D::Distance(P.Pos, Hidden) <= B.WaypointToleranceCm) { BackAt = P.Now; }
+		const bool bAtExposed = FVector2D::Distance(P.Pos, Exposed) <= B.WaypointToleranceCm;
+		if (OutAt < 0.0 && bAtExposed) { OutAt = P.Now; }
+		if (OutAt >= 0.0 && LeftAt < 0.0 && !bAtExposed) { LeftAt = P.Now; }
+		if (LeftAt >= 0.0 && FVector2D::Distance(P.Pos, Hidden) <= B.WaypointToleranceCm) { BackAt = P.Now; }
 	}
 	TestTrue(TEXT("peek: steps out"), OutAt >= 0.0);
-	TestTrue(TEXT("peek: and back behind cover"), BackAt > OutAt);
+	TestTrue(TEXT("peek: stays out at least PeekPeriodMin (the dwell starts on arrival)"), LeftAt - OutAt >= B.PeekPeriodMinSeconds - 1.0 / 60.0);
+	TestTrue(TEXT("peek: and back behind cover"), BackAt > LeftAt);
 	for (const FIntPoint& T : P.Tiles) { TestTrue(TEXT("peek: never inside cover"), G.IsWalkable(T)); }
 
 	FBotBrain NoCover;
@@ -188,6 +191,22 @@ bool FFPSBotBrainInvestigateTest::RunTest(const FString& Parameters)
 	FSim S{ Start };
 	S.Run(Strafe, Map, 1.f / 60.f, 300.f, B);
 	TestEqual(TEXT("...but turn to face the stimulus (+Y = yaw 90)"), S.Intents.Last().LookYawDeg, 90.f, 0.01f);
+	FBotBrain Snap;
+	Snap.Start(Setup(EBotBehaviour::Patrol), Map, G, 10, Start, 0.0, B);
+	Snap.Investigate(FPSNav::TileCenterLocal(Map, FIntPoint(6, 3)), Start, 0.0, B); // (6,3) is a cover tile in the wall
+	TestTrue(TEXT("a stimulus on cover snaps to a walkable tile"), Snap.IsInvestigating());
+
+	FMapSpec Pocket = FPSArena::MakeOpenFloorSpec(10, TEXT("pocket"));
+	Pocket.Tiles[1][2] = TEXT('h'); Pocket.Tiles[3][2] = TEXT('h'); Pocket.Tiles[2][1] = TEXT('h'); Pocket.Tiles[2][3] = TEXT('h');
+	const FPSNav::FTileGraph PG = FPSNav::FTileGraph::Build(Pocket);
+	const FVector2D KStart = FPSNav::TileCenterLocal(Pocket, FIntPoint(8, 8));
+	FBotBrain Keep;
+	Keep.Start(Setup(EBotBehaviour::Explore), Pocket, PG, 11, KStart, 0.0, B);
+	Keep.Investigate(FPSNav::TileCenterLocal(Pocket, FIntPoint(8, 2)), KStart, 0.0, B);
+	Keep.Investigate(FPSNav::TileCenterLocal(Pocket, FIntPoint(2, 2)), KStart, 0.1, B); // walled-in pocket: unreachable
+	FSim K{ KStart };
+	K.Run(Keep, Pocket, 0.5f, 400.f, B);
+	TestTrue(TEXT("an unreachable second target keeps the first path"), Keep.IsInvestigating() && K.Pos.Y < KStart.Y - 100.0);
 	return true;
 }
 

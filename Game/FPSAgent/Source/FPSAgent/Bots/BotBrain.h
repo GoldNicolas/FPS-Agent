@@ -49,6 +49,7 @@ namespace FPSBots
 
 		bool PlanTo(const FIntPoint& Goal, const FVector2D& Pos, double Now, const FBotBehaviourSettings& B);
 		FVector2D FollowPath(const FVector2D& Pos, double Now, const FBotBehaviourSettings& B, bool& bArrived);
+		FIntPoint NearestWalkable(const FIntPoint& Tile, const FVector2D& Target) const;
 		FIntPoint PickExploreTarget(const FVector2D& Pos, const FBotBehaviourSettings& B);
 		void PickPatrolWaypoints(const FVector2D& Pos, const FBotBehaviourSettings& B);
 
@@ -70,6 +71,7 @@ namespace FPSBots
 		float StrafeSign = 1.f;
 		bool bCrouchNow = false;
 		bool bPeekOut = false;
+		bool bPeekWaiting = false;
 		double PauseUntil = -1.0;
 
 		TArray<FIntPoint> Waypoints;

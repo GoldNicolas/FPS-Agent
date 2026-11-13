@@ -52,7 +52,6 @@ namespace FPSBots
 		{
 		case EBotBehaviour::Strafe: NextToggle = Now + Rng.FRandRange(B.StrafePeriodMinSeconds, B.StrafePeriodMaxSeconds); break;
 		case EBotBehaviour::Crouch: NextToggle = Now + Rng.FRandRange(B.CrouchPeriodMinSeconds, B.CrouchPeriodMaxSeconds); break;
-		case EBotBehaviour::Peek:   NextToggle = Now + Rng.FRandRange(B.PeekPeriodMinSeconds, B.PeekPeriodMaxSeconds); break;
 		case EBotBehaviour::Patrol: PickPatrolWaypoints(Pos, B); break;
 		default: break;
 		}
@@ -74,15 +73,12 @@ namespace FPSBots
 
 	bool FBotBrain::PlanTo(const FIntPoint& Goal, const FVector2D& Pos, double Now, const FBotBehaviourSettings& B)
 	{
-		PathPoints.Reset();
-		PathIndex = 0;
-		BestDist = TNumericLimits<double>::Max();
-		ProgressTime = Now;
 		const TArray<FIntPoint> Tiles = Graph->FindPath(FPSNav::TileAt(*Map, Pos), Goal);
 		if (Tiles.Num() == 0)
 		{
 			return false;
 		}
+		TArray<FVector2D> NewPoints;
 		for (int32 i = 1; i < Tiles.Num(); ++i)
 		{
 			FVector2D P = FPSNav::TileCenterLocal(*Map, Tiles[i]);
@@ -90,12 +86,16 @@ namespace FPSBots
 			{
 				P += FVector2D(Rng.FRandRange(-1.f, 1.f), Rng.FRandRange(-1.f, 1.f)) * B.PathOffsetCm;
 			}
-			PathPoints.Add(P);
+			NewPoints.Add(P);
 		}
-		if (PathPoints.Num() == 0)
+		if (NewPoints.Num() == 0)
 		{
-			PathPoints.Add(FPSNav::TileCenterLocal(*Map, Goal));
+			NewPoints.Add(FPSNav::TileCenterLocal(*Map, Goal));
 		}
+		PathPoints = MoveTemp(NewPoints);
+		PathIndex = 0;
+		BestDist = TNumericLimits<double>::Max();
+		ProgressTime = Now;
 		return true;
 	}
 
@@ -152,6 +152,34 @@ namespace FPSBots
 		return Best;
 	}
 
+	FIntPoint FBotBrain::NearestWalkable(const FIntPoint& Tile, const FVector2D& Target) const
+	{
+		if (Graph->IsWalkable(Tile))
+		{
+			return Tile;
+		}
+		FIntPoint Best(-1, -1);
+		double BestD = TNumericLimits<double>::Max();
+		for (int32 Dr = -2; Dr <= 2; ++Dr)
+		{
+			for (int32 Dc = -2; Dc <= 2; ++Dc)
+			{
+				const FIntPoint T = Tile + FIntPoint(Dr, Dc);
+				if (!Graph->IsWalkable(T))
+				{
+					continue;
+				}
+				const double D = FVector2D::DistSquared(FPSNav::TileCenterLocal(*Map, T), Target);
+				if (D < BestD)
+				{
+					BestD = D;
+					Best = T;
+				}
+			}
+		}
+		return Best;
+	}
+
 	void FBotBrain::Investigate(const FVector2D& Target, const FVector2D& Pos, double Now, const FBotBehaviourSettings& B)
 	{
 		if (!Map || !Graph)
@@ -163,7 +191,8 @@ namespace FPSBots
 			FacingYaw = YawOf(Target - Pos); // hold the spot, face the stimulus
 			return;
 		}
-		if (PlanTo(FPSNav::TileAt(*Map, Target), Pos, Now, B))
+		const FIntPoint Goal = NearestWalkable(FPSNav::TileAt(*Map, Target), Target);
+		if (Goal.X >= 0 && PlanTo(Goal, Pos, Now, B))
 		{
 			Mode = EMode::Investigate;
 		}
@@ -244,11 +273,17 @@ namespace FPSBots
 			if (FVector2D::Distance(Pos, Goal) > B.WaypointToleranceCm)
 			{
 				I.MoveDir = (Goal - Pos).GetSafeNormal();
+				bPeekWaiting = false;
+			}
+			else if (!bPeekWaiting)
+			{
+				bPeekWaiting = true; // arrived: the dwell starts now
+				NextToggle = Now + Rng.FRandRange(B.PeekPeriodMinSeconds, B.PeekPeriodMaxSeconds);
 			}
 			else if (Now >= NextToggle)
 			{
 				bPeekOut = !bPeekOut;
-				NextToggle = Now + Rng.FRandRange(B.PeekPeriodMinSeconds, B.PeekPeriodMaxSeconds);
+				bPeekWaiting = false;
 			}
 			break;
 		}
