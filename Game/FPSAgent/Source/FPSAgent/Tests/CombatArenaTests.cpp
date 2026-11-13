@@ -254,4 +254,61 @@ bool FFPSCombatArenaS1Test::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatArenaS1FairnessTest, "FPSAgent.Combat.Arena.S1Fairness",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatArenaS1FairnessTest::RunTest(const FString& Parameters)
+{
+	FPSTest::FTestWorld W;
+	TStrongObjectPtr<UCombatArena> A(NewObject<UCombatArena>(GetTransientPackage()));
+	A->Build(W.World, 0, FVector::ZeroVector, 7, /*StageIndex=*/1);
+	FPSCurriculum::FCombatEpisode E;
+	E.Map = A->GetBaseSpec();
+	const int32 Mid = E.Map.Rows() / 2;
+	E.Map.Tiles[Mid - 3][Mid] = TEXT('h');      // a high block at world (1000, 200), between the agent and the bot
+	E.AgentYawDeg = 0.f;
+	FPSCurriculum::FBotSpawn Hidden;
+	Hidden.Offset = FVector2D(1600.0, 200.0);   // behind the block
+	Hidden.YawDeg = 180.f;                       // facing the agent: only the cover hides it
+	Hidden.Behaviour = FPSBots::EBotBehaviour::Patrol;
+	E.Bots = { Hidden };
+	A->StartEpisode(E, 21, 0.0);
+	A->PrepareDecision(0.1);
+	A->PrepareDecision(0.6);
+	TestFalse(TEXT("a bot behind high cover doesn't see the agent (rule 4)"), A->GetBotBrain(0).IsInvestigating());
+
+	auto Sound = [](double X, double Y, double Time, FPSBots::ESoundKind Kind, int32 Source)
+	{
+		FPSBots::FSoundEvent S;
+		S.Position = FVector(X, Y, 90.0);
+		S.Time = Time;
+		S.Kind = Kind;
+		S.Source = Source;
+		return S;
+	};
+	A->EmitSound(Sound(1500.0, 600.0, 0.6, FPSBots::ESoundKind::Footstep, 1)); // another bot's step, right next to bot 0
+	A->PrepareDecision(1.1);
+	TestFalse(TEXT("bots ignore other bots' sounds"), A->GetBotBrain(0).IsInvestigating());
+
+	A->EmitSound(Sound(0.0, 500.0, 1.0, FPSBots::ESoundKind::Gunshot, INDEX_NONE)); // the agent's own shot
+	A->EmitSound(Sound(0.0, 2000.0, 1.0, FPSBots::ESoundKind::Footstep, 0));       // 20 m: beyond the 15 m footstep radius
+	A->EmitSound(Sound(0.0, 500.0, -0.5, FPSBots::ESoundKind::Footstep, 0));       // 1.5 s old at Now = 1.0 (memory 1 s)
+	FPSCombatObs::FObservationData O;
+	A->BuildObservation(O, 1.0);
+	TestEqual(TEXT("the agent hears neither its own, far nor stale sounds"), O.Sounds.Num(), 0);
+
+	for (int32 i = 0; i < 6; ++i)
+	{
+		A->EmitSound(Sound(0.0, 300.0 + 50.0 * i, 1.0 + 0.01 * i, FPSBots::ESoundKind::Footstep, 0));
+	}
+	A->BuildObservation(O, 1.1);
+	TestEqual(TEXT("at most MaxSounds (4) sounds"), O.Sounds.Num(), 4);
+	if (O.Sounds.Num() == 4)
+	{
+		TestTrue(TEXT("newest first"), O.Sounds[0][4] <= O.Sounds[3][4]);
+	}
+	A->StartEpisode(E, 22, 2.0);
+	TestEqual(TEXT("sounds reset at each episode start"), A->GetSounds().Num(), 0);
+	return true;
+}
+
 #endif

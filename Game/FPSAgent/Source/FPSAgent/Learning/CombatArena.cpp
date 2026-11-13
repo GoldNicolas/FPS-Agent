@@ -113,6 +113,17 @@ int32 UCombatArena::NextEpisodeSeed() const
 void UCombatArena::ApplyCover(const FMapSpec& Map)
 {
 	int32 Used = 0;
+	// Hides and parks every pool block from index Used on, and records how many are placed.
+	auto ParkRest = [this, &Used]()
+	{
+		for (int32 i = Used; i < CoverPool.Num(); ++i)
+		{
+			CoverPool[i]->SetActorHiddenInGame(true);
+			CoverPool[i]->SetActorEnableCollision(false);
+			CoverPool[i]->SetActorLocation(MapOrigin + FVector(0.0, 0.0, -1000.0 - 10.0 * i));
+		}
+		VisibleCover = Used;
+	};
 	for (int32 R = 0; R < Map.Rows(); ++R)
 	{
 		for (int32 C = 0; C < Map.Cols(); ++C)
@@ -125,7 +136,8 @@ void UCombatArena::ApplyCover(const FMapSpec& Map)
 			if (!CoverPool.IsValidIndex(Used))
 			{
 				UE_LOG(LogFPSAgent, Warning, TEXT("Combat: arena %d's cover pool (%d) is too small for this layout"), ArenaIndex, CoverPool.Num());
-				break;
+				ParkRest();
+				return; // warn once, not per row
 			}
 			const float H = Ch == TEXT('h') ? FPSMapFormat::HighCoverCm : FPSMapFormat::LowCoverCm;
 			AStaticMeshActor* Block = CoverPool[Used++];
@@ -135,13 +147,7 @@ void UCombatArena::ApplyCover(const FMapSpec& Map)
 			Block->SetActorEnableCollision(true);
 		}
 	}
-	for (int32 i = Used; i < CoverPool.Num(); ++i)
-	{
-		CoverPool[i]->SetActorHiddenInGame(true);
-		CoverPool[i]->SetActorEnableCollision(false);
-		CoverPool[i]->SetActorLocation(MapOrigin + FVector(0.0, 0.0, -1000.0 - 10.0 * i));
-	}
-	VisibleCover = Used;
+	ParkRest();
 }
 
 void UCombatArena::StartEpisode(const FPSCurriculum::FS0Episode& Config, int32 Seed, double Now)
@@ -239,8 +245,11 @@ void UCombatArena::TickAction(float DeltaSeconds)
 	const UFPSAgentSettings& S = Settings();
 	Ledger.Add(ETerm::Time, S.Combat.Reward.TimePerSecond * DeltaSeconds);
 	const double TickNow = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
-	TickBots(TickNow, DeltaSeconds);
-	EmitFootsteps(TickNow);
+	if (StageIndex > 0) // S1+ only: S0 keeps build A's static, non-reacting bots (snapshots and references stay comparable)
+	{
+		TickBots(TickNow, DeltaSeconds);
+		EmitFootsteps(TickNow);
+	}
 	if (!Agent || IsAgentDead())
 	{
 		return;
@@ -334,7 +343,10 @@ void UCombatArena::SetAction(const FPSCombatObs::FAgentAction& Action)
 
 void UCombatArena::PrepareDecision(double Now)
 {
-	SenseBots(Now);
+	if (StageIndex > 0) // S1+ only: S0 keeps build A's static, non-reacting bots (snapshots and references stay comparable)
+	{
+		SenseBots(Now);
+	}
 	const UFPSAgentSettings& S = Settings();
 	TArray<FPSPerception::FSighting> Sightings;
 	Sense(Sightings);
