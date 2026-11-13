@@ -13,6 +13,9 @@ train_n<N>_bs<B>/   (trainer --batch-size B + N games)
     it holds MaxStepNum steps; the value comes from the saved trainer config). Simulated = K * 60 *
     final game time, summed over games, so used/simulated shows how much was discarded as stale.
 Writes sim.csv / train.csv into the run folder.
+STAGE=S0 runs (L-007) read the "Combat: ready" / "CombatStats" lines instead: a step is one agent decision
+(15 per game second, from decisionsPerSecond= in the ready line), and the train table adds the final ramp
+level and clear rate of the last CombatStats line (mean over games).
 """
 import calendar
 import csv
@@ -25,8 +28,9 @@ import sys
 import time
 
 PREFIX = re.compile(r"^\[(\d{4})\.(\d{2})\.(\d{2})-(\d{2})\.(\d{2})\.(\d{2}):(\d{3})\]")
-STATS = re.compile(r"SpikeA stats: gameTime=(\d+)s .*agentSteps/s\(wall\)=(\d+)")
-READY = re.compile(r"SpikeA: ready\. arenas=(\d+)")
+STATS = re.compile(r"(?:SpikeA stats|CombatStats): gameTime=(\d+)s .*(?:agentSteps|decisions)/s\(wall\)=(\d+)")
+READY = re.compile(r"(?:SpikeA: ready\. arenas=(\d+)|Combat: ready\. stage=\S+ arenas=(\d+) .*decisionsPerSecond=([\d.]+))")
+COMBAT = re.compile(r"CombatStats: .* clear=([\d.]+)% .* level=([\d.]+)\(")
 ITER = re.compile(r"^(\d+\.\d+) .*Iter:\s+(\d+) \| Avg Rew: \S+ \| Avg Rew Sum:\s+(\S+) \| Avg Return: \S+ \| "
                   r"Avg Episode Len:\s+(\S+) \| Batch Size: (\d+)")
 PROFILE = re.compile(r"Profile\| (.+?)\s+(\d+)ms")
@@ -48,26 +52,32 @@ def read_info(d):
 
 
 def game_stats(path):
-    arenas, rows = None, []
+    """-> arenas, steps per game second per arena (60 SpikeA, 15 S0), [(wall, gameTime, steps/s)], last (clear %, level)"""
+    arenas, hz, rows, last = None, 60.0, [], None
     with open(path, errors="replace") as f:
         for line in f:
             p = PREFIX.match(line)
             if not p:
                 continue
             if (m := READY.search(line)):
-                arenas = int(m.group(1))
+                if m.group(1):
+                    arenas = int(m.group(1))
+                else:
+                    arenas, hz = int(m.group(2)), float(m.group(3))
             elif (m := STATS.search(line)):
                 rows.append((ue_wall(p), int(m.group(1)), int(m.group(2))))
-    return arenas, rows
+                if (c := COMBAT.search(line)):
+                    last = (float(c.group(1)), float(c.group(2)))
+    return arenas, hz, rows, last
 
 
-def steady_rate(arenas, rows, skip=5.0):
+def steady_rate(arenas, hz, rows, skip=5.0):
     if arenas is None or len(rows) < 2:
         return None
     rows = [r for r in rows if r[0] >= rows[0][0] + skip] or rows
     if len(rows) < 2 or rows[-1][0] <= rows[0][0]:
         return None
-    return arenas * 60.0 * (rows[-1][1] - rows[0][1]) / (rows[-1][0] - rows[0][0])
+    return arenas * hz * (rows[-1][1] - rows[0][1]) / (rows[-1][0] - rows[0][0])
 
 
 def cpu_samples(d):
@@ -107,7 +117,7 @@ def summarize_sim(run):
     for d in sorted(glob.glob(os.path.join(run, "sim_n*_k*")), key=lambda p: tuple(int(x) for x in re.findall(r"\d+", os.path.basename(p)))):
         info = read_info(d)
         n, k = int(info["n"]), int(info["k"])
-        rates = [r for r in (steady_rate(*game_stats(p)) for p in glob.glob(os.path.join(d, "game_*.log"))) if r]
+        rates = [r for r in (steady_rate(*game_stats(p)[:3]) for p in glob.glob(os.path.join(d, "game_*.log"))) if r]
         engines = {pid: s for pid, s in cpu_samples(d).items() if "Binaries/Linux/FPSAgent " in s[0][4]}
         c = [x for x in (cores(s) for s in engines.values()) if x is not None]
         rss = [max(x[2] for x in s) / 1024 for s in engines.values()]
@@ -115,7 +125,7 @@ def summarize_sim(run):
         total = sum(rates) if rates else None
         per = statistics.fmean(rates) if rates else None
         rows.append({
-            "n": n, "k": k, "agents": n * k, "processes_measured": len(rates),
+            "n": n, "k": k, "level": info.get("level", ""), "agents": n * k, "processes_measured": len(rates),
             "total_steps_s": total, "per_process_steps_s": per,
             "ticks_s": per / k if per else None, "game_s_per_wall_s": per / k / 60 if per else None,
             "cores_per_process": statistics.fmean(c) if c else None, "cores_total": sum(c) if c else None,
@@ -125,10 +135,10 @@ def summarize_sim(run):
     if not rows:
         return
     print("\n### Simulation only (policy playback, no trainer)\n")
-    print("| N proc | K arenas | agents | steps/s total | steps/s per process | ticks/s per process | game s per wall s | CPU cores per process | steps/s per core | RSS MB per process | threads |")
-    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
+    print("| N proc | K arenas | level | agents | steps/s total | steps/s per process | steps/s per arena | game s per wall s | CPU cores per process | steps/s per core | RSS MB per process | threads |")
+    print("|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|")
     for r in rows:
-        print(f"| {r['n']} | {r['k']} | {r['agents']} | {fmt(r['total_steps_s'])} | {fmt(r['per_process_steps_s'])} | {fmt(r['ticks_s'])} | "
+        print(f"| {r['n']} | {r['k']} | {r['level'] or '-'} | {r['agents']} | {fmt(r['total_steps_s'])} | {fmt(r['per_process_steps_s'])} | {fmt(r['ticks_s'])} | "
               f"{fmt(r['game_s_per_wall_s'], 1)} | {fmt(r['cores_per_process'], 2)} | {fmt(r['steps_s_per_core'])} | {fmt(r['rss_mb_per_process'])} | {r['threads_per_process']} |")
     write_csv(os.path.join(run, "sim.csv"), rows)
 
@@ -190,11 +200,13 @@ def summarize_train(run):
                     cpu_fallback = True
         cfgs = glob.glob(os.path.join(d, "trainer", "*", "Configs", "*.json"))
         max_steps = find_key(json.load(open(cfgs[0])), "MaxStepNum") if cfgs else None
-        sim = 0.0
+        sim, lasts = 0.0, []
         for p in glob.glob(os.path.join(d, "game_*.log")):
-            arenas, srows = game_stats(p)
+            arenas, hz, srows, last = game_stats(p)
             if arenas and srows:
-                sim += arenas * 60.0 * srows[-1][1]
+                sim += arenas * hz * srows[-1][1]
+            if last:
+                lasts.append(last)
         steady = iters[2:] if len(iters) > 3 else iters
         period = (steady[-1][0] - steady[0][0]) / (len(steady) - 1) if len(steady) > 1 else None
         hit = next((it for it in iters if it[2] >= TARGET), None)
@@ -226,20 +238,23 @@ def summarize_train(run):
             "game_cores_total": sum(c for c in (cores(s) for s in engines) if c is not None) if engines else None,
             "trainer_cores": cores(trainer[0]) if trainer else None,
             "game_exit_codes": info.get("game_exit_codes", "?"), "limit_hit": info.get("limit_hit", "?"),
+            "final_clear_pct": statistics.fmean(x[0] for x in lasts) if lasts else None,
+            "final_level": statistics.fmean(x[1] for x in lasts) if lasts else None,
         })
     if not rows:
         return
     print("\n### Training (external trainer)\n")
-    print("| first seed | N games | --batch-size | trainer on | polls | batches | s per batch | PPO train s | Pull Experience s | create batches s | used steps/s | used / simulated | Avg Rew Sum (last 3) | batch, wall s to >= 9 | GPU util median / max | trainer cores | game cores | exits |")
-    print("|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---:|---:|---|")
+    print("| first seed | N games | K arenas | --batch-size | trainer on | polls | batches | s per batch | PPO train s | Pull Experience s | create batches s | used steps/s | used / simulated | Avg Rew Sum (last 3) | batch, wall s to >= 9 | final clear % / level | GPU util median / max | trainer cores | game cores | exits |")
+    print("|---:|---:|---:|---:|---|---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|---|---:|---:|---|")
     for r in rows:
         to9 = "never" if r["batch_reaching_9"] is None else f"{r['batch_reaching_9']}, {r['wall_s_to_9']:.0f} s"
         gpu = "n/a" if r["gpu_util_median"] is None else f"{r['gpu_util_median']:.0f}% / {r['gpu_util_max']:.0f}%"
         dev = r["trainer_ran_on"] + ("" if r["trainer_ran_on"] == r["device"] else f" (asked {r['device']}!)")
-        print(f"| {r['seed0'] or 'job*1000'} | {r['n']} | {r['batch_size']} | {dev} | {r['poll']} | {r['batches']} | {fmt(r['batch_period_s'], 2)} | "
+        fin = "n/a" if r["final_level"] is None else f"{r['final_clear_pct']:.0f}% / {r['final_level']:.2f}"
+        print(f"| {r['seed0'] or 'job*1000'} | {r['n']} | {r['arenas']} | {r['batch_size']} | {dev} | {r['poll']} | {r['batches']} | {fmt(r['batch_period_s'], 2)} | "
               f"{fmt(r['ppo_train_s'], 2)} | {fmt(r['pull_experience_s'], 2)} | {fmt(r['create_batches_s'], 2)} | "
               f"{fmt(r['used_steps_s'])} | {fmt(r['used_fraction'], 2)} | {fmt(r['final_avg_rew_sum'], 2)} | "
-              f"{to9} | {gpu} | {fmt(r['trainer_cores'], 2)} | {fmt(r['game_cores_total'], 1)} | {r['game_exit_codes']}{' LIMIT' if r['limit_hit'] == '1' else ''} |")
+              f"{to9} | {fin} | {gpu} | {fmt(r['trainer_cores'], 2)} | {fmt(r['game_cores_total'], 1)} | {r['game_exit_codes']}{' LIMIT' if r['limit_hit'] == '1' else ''} |")
     write_csv(os.path.join(run, "train.csv"), rows)
 
 

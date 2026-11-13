@@ -11,12 +11,21 @@
 #                      pinned trainer in cluster/learning_agents_python/ (LOCAL-owned) is not changed.
 # Each config gets its own folder in the run; cluster/scripts/spikeB_summarize.py turns the run into
 # tables + CSV.
+# STAGE=S0 (build-10520b5 and newer, L-007): combat stage S0 instead of the SpikeA reach task.
+#   sim:   a config may end in @L (difficulty 0-1, default 0): the games run -Eval with a huge episode count at
+#          that fixed level (no ramp), from RESUME_FROM or with SIM_SCRIPTED=1 the -Scripted reference.
+#          @0 = 1 static bot per arena, @1 = 5, so the pair shows what the bots cost.
+#   train: the games also write -StatsCsv=<config>/stats_<i>.csv; SET="..." passes -Set= (D-025).
+# Since D-029 the pinned trainer already has the shortened polls, so :poll (which patches a copy) only
+# applies to a trainer from before commit c5784a5; on the patched one its exact-match check stops the job.
 #
 #   mkdir -p ~/beanRant/logs
 #   S=~/beanRant/FPS-Agent/cluster/slurm/spikeB.sbatch
 #   sbatch -t 30 --export=ALL,MODE=sim,RESUME_FROM=<dir with the 4 .bin> $S
 #   sbatch -t 60 --gres=gpu:1 --export=ALL,MODE=train,ARENAS=32 $S
 #   sbatch -t 120 --gres=gpu:1 --export=ALL,MODE=train,CONFIGS="1x1:poll 8x8:poll 1x1:cpu 8x8:cpu" $S
+#   sbatch -t 30 --gres=none --export=ALL,STAGE=S0,BUILD_SHA=10520b5,MODE=sim,RESUME_FROM=<dir>,CONFIGS="1x32@0 1x32@1" $S
+#   sbatch -t 120 --gres=gpu:1 -c 48 --export=ALL,STAGE=S0,BUILD_SHA=10520b5,MODE=train,ARENAS=32,CONFIGS="4x4 8x8" $S
 #SBATCH --job-name=spikeB
 #SBATCH -p gpuq
 #SBATCH -N 1
@@ -27,7 +36,10 @@
 set -uo pipefail
 
 MODE=${MODE:-sim}
+STAGE=${STAGE:-SpikeA}            # SpikeA or S0
 BUILD_SHA=${BUILD_SHA:-07eac52}
+SIM_SCRIPTED=${SIM_SCRIPTED:-0}   # S0 sim: the -Scripted reference instead of RESUME_FROM's policy
+SET=${SET:-}                      # S0 train: -Set=... overrides (D-025)
 RESUME_FROM=${RESUME_FROM:-}      # sim: trained snapshots, so agents act like trained agents
 ARENAS=${ARENAS:-32}              # train: arenas per game
 BATCHES=${BATCHES:-25}            # train: experience batches per config
@@ -51,7 +63,8 @@ export XDG_CACHE_HOME=$BEAN/.cache CUDA_CACHE_PATH=$BEAN/.cache/nv
 
 T0=$(date +%s)
 {
-  echo "run_id=$RUN_ID mode=$MODE job=$SLURM_JOB_ID host=$(hostname) start=$(date -Is)"
+  echo "run_id=$RUN_ID mode=$MODE stage=$STAGE job=$SLURM_JOB_ID host=$(hostname) start=$(date -Is)"
+  echo "set=${SET:-none} sim_scripted=$SIM_SCRIPTED"
   echo "build=$BUILD_SHA repo_commit=$(git -C "$REPO" rev-parse --short HEAD) configs=\"$CONFIGS\""
   echo "arenas=$ARENAS batches=$BATCHES seconds_each=$SECONDS_EACH resume_from=${RESUME_FROM:-none}"
   echo "cpus=${SLURM_CPUS_PER_TASK:-?} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-none} nproc=$(nproc)"
@@ -72,12 +85,20 @@ trap '[ -n "$SAMPLER" ] && kill "$SAMPLER" 2>/dev/null; pkill -f -- "$RUN/" 2>/d
 
 if [ "$MODE" = sim ]; then
   for C in $CONFIGS; do
-    N=${C%x*}; K=${C#*x}; D=$RUN/sim_n${N}_k${K}; mkdir -p "$D"
-    echo "config=$C n=$N k=$K start=$(date +%s.%N)" > "$D/info.txt"
+    SPEC=${C%@*}; LVL=0; [[ $C == *@* ]] && LVL=${C#*@}
+    N=${SPEC%x*}; K=${SPEC#*x}; D=$RUN/sim_n${N}_k${K}$([ "$STAGE" = S0 ] && echo "_l$LVL"); mkdir -p "$D"
+    echo "config=$C n=$N k=$K level=$LVL stage=$STAGE start=$(date +%s.%N)" > "$D/info.txt"
+    if [ "$STAGE" = S0 ]; then
+      # Fixed level, no ramp: -Eval with more episodes than fit in SECONDS_EACH.
+      SIMARGS=(-Stage=S0 -Eval -EvalEpisodes=1000000 -StartDifficulty="$LVL")
+      if [ "$SIM_SCRIPTED" = 1 ]; then SIMARGS+=(-Scripted); else SIMARGS+=(-ResumeFrom="$RESUME_FROM"); fi
+    else
+      SIMARGS=(-Stage=SpikeA -Infer ${RESUME_FROM:+-ResumeFrom="$RESUME_FROM"})
+    fi
     TPIDS=()
     for i in $(seq 0 $((N - 1))); do
-      HOME=$GAME_HOME timeout "$SECONDS_EACH" "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended -Stage=SpikeA \
-        -Arenas="$K" -Infer ${RESUME_FROM:+-ResumeFrom="$RESUME_FROM"} -Seed=$((SLURM_JOB_ID * 1000 + i)) \
+      HOME=$GAME_HOME timeout "$SECONDS_EACH" "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended "${SIMARGS[@]}" \
+        -Arenas="$K" -Seed=$((SLURM_JOB_ID * 1000 + i)) \
         -abslog="$D/game_$i.log" > /dev/null 2>&1 &
       TPIDS+=($!)
     done
@@ -127,7 +148,7 @@ PYEOF
     POLL=stock; TDIR=$STOCK; [[ $OPTS == *:poll* ]] && { POLL=patched; TDIR=$PATCHED; }
     D=$RUN/train_$(printf %02d "$IDX")_n${N}_bs${BS}_${DEV}$([ "$POLL" = patched ] && echo _poll); mkdir -p "$D"
     PORT=$((PORT0 + IDX)); SEED0=$((SLURM_JOB_ID * 1000 + IDX * 50)); IDX=$((IDX + 1))
-    echo "config=$C n=$N batch_size=$BS arenas=$ARENAS batches=$BATCHES port=$PORT seed0=$SEED0 device=$DEV poll=$POLL" > "$D/info.txt"
+    echo "config=$C n=$N batch_size=$BS arenas=$ARENAS batches=$BATCHES port=$PORT seed0=$SEED0 device=$DEV poll=$POLL stage=$STAGE" > "$D/info.txt"
     # :cpu hides the GPU; the trainer then logs "Defaulting to CPU training" and continues.
     if [ "$DEV" = cpu ]; then VIS=(env CUDA_VISIBLE_DEVICES=); else VIS=(env); fi
     # Trainer first; each output line gets an epoch timestamp (ms) for the batch timing.
@@ -147,7 +168,9 @@ PYEOF
     echo "launch=$(date +%s.%N)" >> "$D/info.txt"
     GAMES=()
     for i in $(seq 0 $((N - 1))); do
-      HOME=$GAME_HOME "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended -Stage=SpikeA -Arenas="$ARENAS" \
+      STAGEARGS=(-Stage="$STAGE")
+      [ "$STAGE" = S0 ] && STAGEARGS+=(-StatsCsv="$D/stats_$i.csv" ${SET:+-Set="$SET"})
+      HOME=$GAME_HOME "$BUILD/FPSAgent.sh" -nullrhi -nosound -unattended "${STAGEARGS[@]}" -Arenas="$ARENAS" \
         -Seed=$((SEED0 + i)) -Batches="$BATCHES" \
         -LearningAgentsUseExternalTrainingProcess -LearningAgentsIpAddress=127.0.0.1 \
         -LearningAgentsPort=$PORT -LearningAgentsTimeout="$CONNECT_TIMEOUT" \
