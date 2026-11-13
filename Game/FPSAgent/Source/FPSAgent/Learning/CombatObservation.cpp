@@ -51,6 +51,14 @@ namespace FPSCombatObs
 			FMath::Clamp(Safe(SecondsAgo, P.HitIndicatorSeconds), 0.f, 1.f) };
 	}
 
+	TArray<float> PackSound(const FVector& DirectionView, float DistanceCm, float AgeSeconds, const FCombatPerceptionSettings& P, float SoundMemorySeconds)
+	{
+		const FVector D = DirectionView.GetSafeNormal();
+		return { static_cast<float>(D.X), static_cast<float>(D.Y), static_cast<float>(D.Z),
+			FMath::Clamp(Safe(DistanceCm, FMath::Max(1.f, P.PositionScaleCm)), 0.f, 1.f),
+			FMath::Clamp(Safe(AgeSeconds, SoundMemorySeconds), 0.f, 1.f) };
+	}
+
 	FObservationData FObservationData::Zero(int32 RayCount)
 	{
 		FObservationData D;

@@ -48,6 +48,12 @@ bool FFPSCombatObsPackTest::RunTest(const FString& Parameters)
 	TestEqual(TEXT("hit dir y"), Hit[1], 1.f, 1e-5f);
 	TestEqual(TEXT("hit age"), Hit[3], 0.5f, 1e-5f);
 
+	const TArray<float> Sound = PackSound(FVector(0.0, 2.0, 0.0), 1500.f, 0.5f, P, 1.f);
+	TestEqual(TEXT("sound size"), Sound.Num(), SoundSize);
+	TestEqual(TEXT("sound direction (unit, view frame)"), Sound[1], 1.f, 1e-5f);
+	TestEqual(TEXT("sound distance / position scale"), Sound[3], 0.5f, 1e-5f);
+	TestEqual(TEXT("sound age / memory"), Sound[4], 0.5f, 1e-5f);
+
 	const FObservationData Z = FObservationData::Zero(72);
 	TestEqual(TEXT("zero self"), Z.Self.Num(), SelfSize);
 	TestEqual(TEXT("zero rays"), Z.Rays.Num(), 72);

@@ -53,6 +53,8 @@ namespace FPSCombatObs
 	FPSAGENT_API TArray<float> PackEnemy(const FEnemyState& E, const FCombatPerceptionSettings& P);
 	/** [direction x,y,z (view frame, unit), min(age / HitIndicatorSeconds, 1)]. */
 	FPSAGENT_API TArray<float> PackHit(const FVector& DirectionView, float SecondsAgo, const FCombatPerceptionSettings& P);
+	/** [direction x,y,z (view frame, unit), min(distance / PositionScaleCm, 1), min(age / SoundMemorySeconds, 1)] (spec §2 hearing, D-024). */
+	FPSAGENT_API TArray<float> PackSound(const FVector& DirectionView, float DistanceCm, float AgeSeconds, const FCombatPerceptionSettings& P, float SoundMemorySeconds);
 
 	/** One decision's observation, ready for the Learning Agents layer. */
 	struct FObservationData
