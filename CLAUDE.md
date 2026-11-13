@@ -89,7 +89,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
   - Every spec must pass `python -m mapgen validate` before it is committed.
   - Python always runs as `conda run -n fps-agent ...` from `tools/mapgen`. Calling `python.exe` directly crashes because of a DLL conflict on PATH.
   - Commit the preview PNGs (`docs/maps/`) together with the maps.
-- **Console tool caveat:** Unreal-MCP's `console-run-command` runs against the **editor** world, so player-controller Exec commands never reach a play-in-editor session. Expose play-time switches as console variables (`fps.PlayMap`, `fps.TopDown`, `fps.ShowHitboxes`).
+- **Console tool caveat:** Unreal-MCP's `console-run-command` runs against the **editor** world, so player-controller Exec commands never reach a play-in-editor session. Expose play-time switches as console variables (`fps.PlayMap`, `fps.TopDown`, `fps.ShowHitboxes`, `fps.WatchAgent`, `fps.ShowShots`).
 - Use RQL (`rql-query` / `rql-mutate`) for inspecting and small edits to actors, assets and settings.
 - Screenshot tools need a GPU editor. Never put them in anything that runs headless.
 - `python-execute` and `console-run-command` can run arbitrary code (RCE-class). Keep scripts in the repo (`tools/`) so they can be reviewed; avoid long ad-hoc snippets.

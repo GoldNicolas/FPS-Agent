@@ -298,7 +298,19 @@ This is also better for RL. Randomized original layouts keep the agent from memo
    | `pool` | A random pool map, picked by seed |
 
    On a map, the player starts on a random attacker spawn and `BotCount` range bots stand on random spots in the sites, mid and defender spawn.
-4. **Viewing:** `fps.TopDown 1` shows the whole arena from above, north up, and `fps.ShowHitboxes 1` draws hitboxes. These are console variables, so they also work through Unreal-MCP's console tool.
+4. **Viewing:** these are console variables, so they also work through Unreal-MCP's console tool and `-ExecCmds=`. They only change what you see; nothing in training reads them.
+   - `fps.TopDown 1` shows the whole arena from above, north up.
+   - `fps.ShowHitboxes 1` draws hitboxes.
+   - `fps.WatchAgent N` looks through combat arena N's agent, first person, with its own aim, the HUD and hit markers. `-1` returns to the spectator.
+   - `fps.ShowShots 1` draws a tracer for every rifle shot: red = hit a bean, yellow = miss.
+   - **Watching a trained policy:** download the `run-<id>` release (check `SHA256SUMS`), then run the editor build as a game:
+     `UnrealEditor.exe <uproject> -game -windowed -Stage=S0 -Infer -ResumeFrom=<folder> -Arenas=1 -StartDifficulty=1 -ExecCmds="fps.WatchAgent 0, fps.ShowShots 1, t.MaxFPS 60"`.
+     Playback uses the fixed 60 Hz step, so `t.MaxFPS 60` keeps it at real time. The game uncaps the frame rate in code, but a console setting outranks that.
+   - **Video:** `powershell -File tools/record_policy_video.ps1 -Snapshots <folder> [-Episodes 14] [-View Agent|TopDown] [-Title "..."]`.
+     It renders a fixed-seed `-Eval` frame by frame (`-dumpmovie`, exactly 1/60 s per frame, so the video plays in real time), then encodes it with ffmpeg into `Game/FPSAgent/Saved/Videos/`.
+     - Disk: about 2 MB per 1080p frame while recording.
+     - Time: capture is slow, about 1.2 s per frame on the dev laptop, so 60 s of video takes about 70 min.
+     - Limit: when `-TimeoutMinutes` (90) runs out, the frames written so far are still encoded.
 5. **Unreal-MCP's role:** play-test (`StartPlay` / `AdvancePlay`), take screenshots, and inspect actors with RQL.
 
 ---
@@ -617,7 +629,7 @@ Engine flags we rely on: `-nullrhi -nosound -unattended`, `-LearningAgentsUseExt
 
 **Results:**
 - The CLUSTER side writes `docs/runs/<run-id>.md` (plus small CSVs) and publishes the snapshots worth watching as Release `run-<run-id>`.
-- LOCAL pulls the report, downloads the release, then loads the snapshots in the editor to watch the agents or run the deathmatch.
+- LOCAL pulls the report, downloads the release, then loads the snapshots to watch the agents (live, or as a video with `tools/record_policy_video.ps1`; see *Viewing*) or run the deathmatch.
 
 ---
 

@@ -2,8 +2,13 @@
 #include "Character/BeanCharacter.h"
 #include "Character/HealthComponent.h"
 #include "Common/FPSAgentSettings.h"
+#include "DrawDebugHelpers.h"
 #include "Engine/World.h"
+#include "HAL/IConsoleManager.h"
 #include "Weapons/CombatMath.h"
+
+static TAutoConsoleVariable<int32> CVarShowShots(TEXT("fps.ShowShots"), 0,
+	TEXT("1 = draw a short tracer for every rifle shot (red = hit a bean, yellow = miss). Viewing only: nothing reads it, and nothing draws under -nullrhi."), ECVF_Default);
 
 URifleComponent::URifleComponent()
 {
@@ -93,6 +98,20 @@ FShotResult URifleComponent::FireShot(int32 ShotIndex)
 			Result.bHitWorld = true;
 		}
 	}
+#if ENABLE_DRAW_DEBUG
+	if (CVarShowShots.GetValueOnGameThread() != 0)
+	{
+		// Start a little right of and below the eye, like a muzzle, so a first-person view sees the tracer instead of a dot.
+		const FRotationMatrix Axes(EyeRotation);
+		const FVector Muzzle = Result.Start + Axes.GetUnitAxis(EAxis::X) * 40.0 + Axes.GetUnitAxis(EAxis::Y) * 12.0 - Axes.GetUnitAxis(EAxis::Z) * 10.0;
+		const bool bHitBean = Result.Zone != EHitZone::None;
+		DrawDebugLine(World, Muzzle, Result.End, bHitBean ? FColor::Red : FColor::Yellow, false, 0.25f, 0, 0.3f); // thickness is in cm: thin near the eye
+		if (bHitBean)
+		{
+			DrawDebugPoint(World, Result.End, 10.f, Result.Zone == EHitZone::Head ? FColor::Red : FColor::Orange, false, 0.4f);
+		}
+	}
+#endif
 	OnShotFired.Broadcast(Result);
 	return Result;
 }

@@ -2,6 +2,7 @@
 #include "Character/BeanCharacter.h"
 #include "Character/HealthComponent.h"
 #include "Engine/Canvas.h"
+#include "GameFramework/PlayerController.h"
 #include "Weapons/RifleComponent.h"
 
 void ABeanHUD::DrawHUD()
@@ -12,6 +13,10 @@ void ABeanHUD::DrawHUD()
 		return;
 	}
 	ABeanCharacter* Bean = Cast<ABeanCharacter>(GetOwningPawn());
+	if (!Bean && PlayerOwner)
+	{
+		Bean = Cast<ABeanCharacter>(PlayerOwner->GetViewTarget()); // spectating through a bean (fps.WatchAgent)
+	}
 	if (Bean != BoundBean.Get())
 	{
 		if (ABeanCharacter* Old = BoundBean.Get())

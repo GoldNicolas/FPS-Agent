@@ -13,6 +13,7 @@
 #include "InputActionValue.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
+#include "Learning/CombatTaskActor.h"
 #include "Weapons/RifleComponent.h"
 
 void ABeanPlayerController::BuildInput()
@@ -135,6 +136,8 @@ static TAutoConsoleVariable<int32> CVarTopDown(TEXT("fps.TopDown"), 0,
 	TEXT("1 = view the arena from above (north up); 0 = back to the bean."), ECVF_Default);
 static TAutoConsoleVariable<int32> CVarShowHitboxes(TEXT("fps.ShowHitboxes"), 0,
 	TEXT("1 = draw every bean's head/body/legs hitboxes."), ECVF_Default);
+static TAutoConsoleVariable<int32> CVarWatchAgent(TEXT("fps.WatchAgent"), -1,
+	TEXT("Combat stages: N >= 0 = view through arena N's agent (first person, its own aim); -1 = back to the spectator. Viewing only."), ECVF_Default);
 
 void ABeanPlayerController::ShowHitboxes(bool bShow)
 {
@@ -159,6 +162,41 @@ void ABeanPlayerController::PlayerTick(float DeltaTime)
 	{
 		ApplyHitboxes(bWantHitboxes);
 	}
+	const int32 WantWatch = FMath::Max(-1, CVarWatchAgent.GetValueOnGameThread());
+	if (WantWatch != WatchedArena || (WantWatch >= 0 && !WatchedAgent.IsValid()))
+	{
+		ApplyWatchAgent(WantWatch);
+	}
+}
+
+void ABeanPlayerController::ApplyWatchAgent(int32 ArenaIndex)
+{
+	if (ArenaIndex < 0)
+	{
+		const bool bWasWatching = WatchedArena >= 0;
+		WatchedArena = -1;
+		WatchedAgent = nullptr;
+		if (bWasWatching)
+		{
+			if (APawn* MyPawn = GetPawn())
+			{
+				SetViewTargetWithBlend(MyPawn, 0.f);
+			}
+		}
+		return;
+	}
+	for (TActorIterator<ACombatTaskActor> It(GetWorld()); It; ++It)
+	{
+		if (ABeanCharacter* Agent = It->GetArenaAgent(ArenaIndex))
+		{
+			WatchedArena = ArenaIndex;
+			WatchedAgent = Agent;
+			SetViewTargetWithBlend(Agent, 0.f); // the agent's camera follows its controller's aim
+			UE_LOG(LogFPSAgent, Display, TEXT("fps.WatchAgent: viewing through arena %d's agent"), ArenaIndex);
+			return;
+		}
+	}
+	// No combat task (yet), or no such arena: PlayerTick tries again next frame.
 }
 
 void ABeanPlayerController::ApplyHitboxes(bool bShow)

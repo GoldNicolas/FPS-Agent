@@ -30,6 +30,12 @@ public:
 	/** Box around all arenas centred on Origin's arena grid. */
 	static FBox ComputeBounds(int32 ArenaCount, const FVector& Origin);
 
+	/** The agent bean of arena ArenaIndex, or null (viewing: fps.WatchAgent). */
+	ABeanCharacter* GetArenaAgent(int32 ArenaIndex) const
+	{
+		return Arenas.IsValidIndex(ArenaIndex) && Arenas[ArenaIndex] ? Arenas[ArenaIndex]->GetAgent() : nullptr;
+	}
+
 	// ----- Called by UCombatInteractor / UCombatTrainingEnv (per Learning Agents agent id) -----
 	void BuildObservation(int32 AgentId, FPSCombatObs::FObservationData& Out) const;
 	void SetAction(int32 AgentId, const FPSCombatObs::FAgentAction& Action);

@@ -35,6 +35,8 @@ private:
 	void BuildInput();
 	void ApplyTopDown(bool bOn);
 	void ApplyHitboxes(bool bShow);
+	/** fps.WatchAgent: view through that combat arena's agent (first person); -1 = back to our own pawn. */
+	void ApplyWatchAgent(int32 ArenaIndex);
 	ABeanCharacter* GetBean() const;
 	void OnMove(const FInputActionValue& Value);
 	void OnLook(const FInputActionValue& Value);
@@ -59,4 +61,7 @@ private:
 	UPROPERTY() TObjectPtr<ACameraActor> TopDownCamera;
 	bool bTopDownActive = false;
 	bool bHitboxesShown = false;
+	/** Arena whose agent we view through (-1 = none). */
+	int32 WatchedArena = -1;
+	TWeakObjectPtr<ABeanCharacter> WatchedAgent;
 };

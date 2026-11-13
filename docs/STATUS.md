@@ -18,6 +18,9 @@ _Last updated: 2026-11-13 by CLUSTER_
   - **2026-11-12: fix pack published as `build-07eac52`** (C-003/C-004/C-005, 33/33 C++ tests). Request L-005 asks CLUSTER to confirm it.
   - **Combat training design APPROVED by the user (2026-11-12)**: [`superpowers/specs/2026-11-12-combat-training-design.md`](superpowers/specs/2026-11-12-combat-training-design.md). **Next: build A (S0 aim gallery)**, following the 13-task plan [`superpowers/plans/2026-11-12-combat-build-a-s0.md`](superpowers/plans/2026-11-12-combat-build-a-s0.md) (tests first). The cluster gets it as a new build plus request L-007.
   - **2026-11-12: build A shipped as `build-10520b5`** (combat stage S0, the SpikeC probe, the C-007 (2) settings). All 13 plan tasks were reviewed, plus a final whole-branch review and its fix pack (D-028). Local checks are listed in [`builds.md`](builds.md). **Next for CLUSTER: L-007.** C-006 and C-007 are answered below.
+  - **2026-11-13: watched the promoted S0 policy locally** (`run-S0-20261112-152039`, hashes OK, playback only). New view-only switches: `fps.WatchAgent N` (first person through arena N's agent) and `fps.ShowShots 1` (shot tracers). `tools/record_policy_video.ps1` renders a fixed-seed `-Eval` to MP4 (README → *Viewing*).
+    - Local `-Eval` on 1 arena, seed 1000: 100% clear, about 4 s per clear, headshot kills visible.
+    - The video stays local; it isn't committed.
   - **2026-11-12: C-007 (1) done.** With the user's OK, the pinned trainer carries CLUSTER's socket-poll patch (D-029; 15–31% faster per batch in Spike B). It's trainer-side only, so a `git pull` is enough and the game build doesn't change.
 - **CLUSTER:**
   - L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit).
