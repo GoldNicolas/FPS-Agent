@@ -30,7 +30,7 @@ namespace
 	}
 
 	/** A free tile near Near (radius 2, row-major) hidden from the agent's tile, with a free 4-neighbour the agent can see. */
-	bool FindPeekPair(const FMapSpec& Map, const FPSNav::FTileGraph& G, const FIntPoint& Agent, const FIntPoint& Near, const TSet<FIntPoint>& Taken, FIntPoint& OutHidden, FIntPoint& OutExposed)
+	bool FindPeekPair(const FMapSpec& Map, const FPSNav::FTileGraph& G, const FIntPoint& Agent, const FIntPoint& Near, const TSet<FIntPoint>& Taken, const FVector2D& AgentLocal, float MinDist, float MaxDist, FIntPoint& OutHidden, FIntPoint& OutExposed)
 	{
 		static const FIntPoint Dirs[4] = { FIntPoint(-1, 0), FIntPoint(1, 0), FIntPoint(0, 1), FIntPoint(0, -1) };
 		for (int32 Dr = -2; Dr <= 2; ++Dr)
@@ -39,6 +39,11 @@ namespace
 			{
 				const FIntPoint H = Near + FIntPoint(Dr, Dc);
 				if (!G.IsWalkable(H) || H == Agent || Taken.Contains(H) || FPSNav::HasTileLos(Map, Agent, H))
+				{
+					continue;
+				}
+				const double HDist = FVector2D::Distance(FPSNav::TileCenterLocal(Map, H), AgentLocal);
+				if (HDist < MinDist || HDist > MaxDist) // the peek tile keeps the distance knobs too
 				{
 					continue;
 				}
@@ -55,6 +60,46 @@ namespace
 			}
 		}
 		return false;
+	}
+
+	/**
+	 * A bot tile that honours the stage knobs: uniform over free, untaken tiles whose centre lies within [MinDist, MaxDist] of the
+	 * agent and within +/-Spread of its facing; if none, any direction within the band; if none, the free tile closest to the band.
+	 * One RNG draw when a pool exists. (-1, -1) only when no free tile is left.
+	 */
+	FIntPoint PickBotTile(FRandomStream& Rng, const TArray<FIntPoint>& Free, const TSet<FIntPoint>& Taken, const FMapSpec& Map,
+		const FVector2D& AgentLocal, float AgentYawDeg, float MinDist, float MaxDist, float Spread)
+	{
+		TArray<FIntPoint> InCone, InBand;
+		FIntPoint Closest(-1, -1);
+		double ClosestGap = TNumericLimits<double>::Max();
+		for (const FIntPoint& T : Free)
+		{
+			if (Taken.Contains(T))
+			{
+				continue;
+			}
+			const FVector2D D = FPSNav::TileCenterLocal(Map, T) - AgentLocal;
+			const double Dist = D.Size();
+			const double Gap = Dist < MinDist ? MinDist - Dist : (Dist > MaxDist ? Dist - MaxDist : 0.0);
+			if (Gap < ClosestGap)
+			{
+				ClosestGap = Gap;
+				Closest = T;
+			}
+			if (Gap > 0.0)
+			{
+				continue;
+			}
+			InBand.Add(T);
+			const float Yaw = FMath::RadiansToDegrees(FMath::Atan2(D.Y, D.X));
+			if (FMath::Abs(FRotator::NormalizeAxis(Yaw - AgentYawDeg)) <= Spread)
+			{
+				InCone.Add(T);
+			}
+		}
+		const TArray<FIntPoint>& Pool = InCone.Num() > 0 ? InCone : InBand;
+		return Pool.Num() > 0 ? Pool[Rng.RandRange(0, Pool.Num() - 1)] : Closest;
 	}
 }
 
@@ -175,6 +220,10 @@ namespace FPSCurriculum
 		E.Map = FPSArena::MakeCoverFloorSpec(S.FloorTiles, Density, S.LowCoverFraction, Rng, TEXT("s1floor"));
 		const FPSNav::FTileGraph G = FPSNav::FTileGraph::Build(E.Map);
 		const TArray<FIntPoint> Free = G.WalkableTiles();
+		if (Free.Num() == 0)
+		{
+			return E;
+		}
 		const FVector2D MapCenter(E.Map.Center().X, E.Map.Center().Y);
 		const FIntPoint AgentTile = Free[Rng.RandRange(0, Free.Num() - 1)];
 		const FVector2D AgentLocal = FPSNav::TileCenterLocal(E.Map, AgentTile);
@@ -192,21 +241,7 @@ namespace FPSCurriculum
 		TSet<FIntPoint> Taken = { AgentTile };
 		for (int32 i = 0; i < Count; ++i)
 		{
-			FIntPoint Tile(-1, -1);
-			for (int32 Try = 0; Try < PlacementTries && Tile.X < 0; ++Try)
-			{
-				const float Yaw = FMath::DegreesToRadians(E.AgentYawDeg + Rng.FRandRange(-Spread, Spread));
-				const float Dist = Rng.FRandRange(MinDist, MaxDist);
-				const FIntPoint T = FPSNav::TileAt(E.Map, AgentLocal + FVector2D(FMath::Cos(Yaw), FMath::Sin(Yaw)) * Dist);
-				if (G.IsWalkable(T) && !Taken.Contains(T))
-				{
-					Tile = T;
-				}
-			}
-			for (int32 k = 0; k < Free.Num() && Tile.X < 0; ++k) // crowded: the first free tile
-			{
-				if (!Taken.Contains(Free[k])) { Tile = Free[k]; }
-			}
+			FIntPoint Tile = PickBotTile(Rng, Free, Taken, E.Map, AgentLocal, E.AgentYawDeg, MinDist, MaxDist, Spread);
 			if (Tile.X < 0)
 			{
 				break;
@@ -218,7 +253,7 @@ namespace FPSCurriculum
 			if (Bot.Behaviour == FPSBots::EBotBehaviour::Peek)
 			{
 				FIntPoint Hidden, Exposed;
-				if (FindPeekPair(E.Map, G, AgentTile, Tile, Taken, Hidden, Exposed))
+				if (FindPeekPair(E.Map, G, AgentTile, Tile, Taken, AgentLocal, MinDist, MaxDist, Hidden, Exposed))
 				{
 					Tile = Hidden;
 					Bot.PeekHidden = Hidden;

@@ -112,7 +112,7 @@ bool FFPSCurriculumSampleS1Test::RunTest(const FString& Parameters)
 		for (const FString& Row : S.Tiles) { for (const TCHAR Ch : Row) { N += (Ch == TEXT('l') || Ch == TEXT('h')) ? 1 : 0; } }
 		return N;
 	};
-	auto Check = [&](const FCombatEpisode& E, const TCHAR* What)
+	auto Check = [&](const FCombatEpisode& E, const TCHAR* What, double MinCm, double MaxCm)
 	{
 		const FPSNav::FTileGraph G = FPSNav::FTileGraph::Build(E.Map);
 		const FVector2D MapCenter(E.Map.Center().X, E.Map.Center().Y);
@@ -128,6 +128,8 @@ bool FFPSCurriculumSampleS1Test::RunTest(const FString& Parameters)
 			Used.Add(Tile);
 			const float ToAgent = FMath::RadiansToDegrees(FMath::Atan2(AgentLocal.Y - Local.Y, AgentLocal.X - Local.X));
 			TestTrue(FString::Printf(TEXT("%s: no bot sees the agent at spawn"), What), FMath::Abs(FRotator::NormalizeAxis(ToAgent - Bot.YawDeg)) > 0.5f * B.SightFovDeg);
+			const double Dist = FVector2D::Distance(Local, AgentLocal);
+			TestTrue(FString::Printf(TEXT("%s: bot within the distance knobs"), What), Dist >= MinCm - 1.0 && Dist <= MaxCm + 1.0);
 			if (Bot.Behaviour == FPSBots::EBotBehaviour::Peek)
 			{
 				TestTrue(FString::Printf(TEXT("%s: peek starts hidden"), What), Bot.PeekHidden == Tile && !FPSNav::HasTileLos(E.Map, AgentTile, Bot.PeekHidden));
@@ -139,19 +141,22 @@ bool FFPSCurriculumSampleS1Test::RunTest(const FString& Parameters)
 	{
 		FRandomStream Rng(Seed);
 		const FCombatEpisode E = SampleS1(Rng, 0.f, false, C, B);
-		Check(E, TEXT("level 0"));
+		Check(E, TEXT("level 0"), 500.0, 1700.0);
 		TestEqual(TEXT("level 0: one bot"), E.Bots.Num(), 1);
 		TestTrue(TEXT("level 0: almost no cover (<= 5 tiles, jitter)"), CoverCount(E.Map) <= 5);
-		const FPSBots::EBotBehaviour Be = E.Bots[0].Behaviour;
-		TestTrue(TEXT("level 0: strafe, peek or crouch"), Be == FPSBots::EBotBehaviour::Strafe || Be == FPSBots::EBotBehaviour::Peek || Be == FPSBots::EBotBehaviour::Crouch);
-		TestTrue(TEXT("level 0: 60% speed"), E.Bots[0].SpeedScale >= 0.6f && E.Bots[0].SpeedScale <= 0.64f + 1e-4f);
+		if (E.Bots.Num() == 1)
+		{
+			const FPSBots::EBotBehaviour Be = E.Bots[0].Behaviour;
+			TestTrue(TEXT("level 0: strafe, peek or crouch"), Be == FPSBots::EBotBehaviour::Strafe || Be == FPSBots::EBotBehaviour::Peek || Be == FPSBots::EBotBehaviour::Crouch);
+			TestTrue(TEXT("level 0: 60% speed"), E.Bots[0].SpeedScale >= 0.6f && E.Bots[0].SpeedScale <= 0.64f + 1e-4f);
+		}
 	}
 	bool bPatrol = false, bExplore = false;
 	for (int32 Seed = 0; Seed < 30; ++Seed)
 	{
 		FRandomStream Rng(100 + Seed);
 		const FCombatEpisode E = SampleS1(Rng, 1.f, false, C, B);
-		Check(E, TEXT("level 1"));
+		Check(E, TEXT("level 1"), 500.0, 3500.0);
 		TestEqual(TEXT("level 1: five bots"), E.Bots.Num(), 5);
 		TestTrue(TEXT("level 1: medium cover (43..48 tiles)"), CoverCount(E.Map) >= 43 && CoverCount(E.Map) <= 48);
 		for (const FBotSpawn& Bot : E.Bots)
@@ -168,6 +173,11 @@ bool FFPSCurriculumSampleS1Test::RunTest(const FString& Parameters)
 	TestTrue(TEXT("deterministic map"), EA.Map.Tiles == EB.Map.Tiles);
 	TestTrue(TEXT("deterministic agent"), EA.AgentOffset.Equals(EB.AgentOffset, 1e-6) && EA.AgentYawDeg == EB.AgentYawDeg);
 	TestEqual(TEXT("deterministic bots"), EA.Bots.Num(), EB.Bots.Num());
+	for (int32 i = 0; i < EA.Bots.Num() && i < EB.Bots.Num(); ++i)
+	{
+		TestTrue(TEXT("deterministic bot fields"), EA.Bots[i].Offset.Equals(EB.Bots[i].Offset, 1e-6) && EA.Bots[i].YawDeg == EB.Bots[i].YawDeg
+			&& EA.Bots[i].Behaviour == EB.Bots[i].Behaviour && EA.Bots[i].SpeedScale == EB.Bots[i].SpeedScale && EA.Bots[i].bCrouched == EB.Bots[i].bCrouched);
+	}
 
 	FS0Episode S0;
 	S0.AgentYawDeg = 30.f;
