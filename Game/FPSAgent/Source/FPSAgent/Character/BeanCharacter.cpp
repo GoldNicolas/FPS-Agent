@@ -104,8 +104,8 @@ void ABeanCharacter::ApplyMovementTuning()
 {
 	const FMovementTuning& M = UFPSAgentSettings::Get().Movement;
 	UCharacterMovementComponent* Move = GetCharacterMovement();
-	Move->MaxWalkSpeed = bWalking ? M.WalkSpeed : M.RunSpeed;
-	Move->MaxWalkSpeedCrouched = M.CrouchSpeed;
+	Move->MaxWalkSpeed = (bWalking ? M.WalkSpeed : M.RunSpeed) * SpeedScale;
+	Move->MaxWalkSpeedCrouched = M.CrouchSpeed * SpeedScale;
 	Move->MaxAcceleration = M.MaxAcceleration;
 	Move->BrakingDecelerationWalking = M.BrakingDeceleration;
 	Move->GroundFriction = M.GroundFriction;
@@ -180,7 +180,27 @@ void ABeanCharacter::SetWalking(bool bWalk)
 {
 	bWalking = bWalk;
 	const FMovementTuning& M = UFPSAgentSettings::Get().Movement;
-	GetCharacterMovement()->MaxWalkSpeed = bWalking ? M.WalkSpeed : M.RunSpeed;
+	GetCharacterMovement()->MaxWalkSpeed = (bWalking ? M.WalkSpeed : M.RunSpeed) * SpeedScale;
+}
+
+void ABeanCharacter::SetSpeedScale(float Scale)
+{
+	SpeedScale = FMath::Max(0.f, Scale);
+	ApplyMovementTuning();
+}
+
+void ABeanCharacter::ApplyCrouchNow(bool bCrouch)
+{
+	UCharacterMovementComponent* Move = GetCharacterMovement();
+	Move->bWantsToCrouch = bCrouch;
+	if (bCrouch)
+	{
+		Move->Crouch(false);   // resizes the capsule now; the base stays on the floor while walking
+	}
+	else
+	{
+		Move->UnCrouch(false);
+	}
 }
 
 void ABeanCharacter::SetHitboxesVisible(bool bVisible)

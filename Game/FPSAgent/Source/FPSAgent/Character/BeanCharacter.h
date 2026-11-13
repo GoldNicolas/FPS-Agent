@@ -30,6 +30,10 @@ public:
 	bool IsAirborne() const;
 	void SetWalking(bool bWalk);
 	bool IsWalking() const { return bWalking; }
+	/** Movement speed multiplier for run, walk and crouch (scripted bots: the stage's BotSpeedScale). */
+	void SetSpeedScale(float Scale);
+	/** Crouch or stand up now, keeping the feet on the floor (episode starts: Crouch()/UnCrouch() would wait for the next movement tick). */
+	void ApplyCrouchNow(bool bCrouch);
 	void SetHitboxesVisible(bool bVisible);
 	/** Dead beans are hidden, have no collision, and neither move nor shoot. */
 	void SetDeadState(bool bDead);
@@ -54,4 +58,5 @@ protected:
 
 private:
 	bool bWalking = false;
+	float SpeedScale = 1.f;
 };

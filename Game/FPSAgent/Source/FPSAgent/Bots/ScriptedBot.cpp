@@ -30,10 +30,12 @@ void AScriptedBot::EnsureDiedBound()
 	}
 }
 
-void AScriptedBot::Activate(const FVector& Location, float YawDeg, bool bCrouched, int32 Seed)
+void AScriptedBot::Activate(const FVector& Location, float YawDeg, bool bCrouched, int32 Seed, float InSpeedScale)
 {
 	EnsureDiedBound();
 	bActive = true;
+	SetDeadState(false);   // walking mode again, so Crouch/UnCrouch work
+	ApplyCrouchNow(false); // stand up where the bot is first: a crouched capsule teleported to a standing spawn height would float
 	const FRotator Facing(0.0, YawDeg, 0.0);
 	SetActorLocationAndRotation(Location, Facing, false, nullptr, ETeleportType::TeleportPhysics);
 	if (AController* C = GetController())
@@ -43,9 +45,34 @@ void AScriptedBot::Activate(const FVector& Location, float YawDeg, bool bCrouche
 	GetHealth()->ResetToFull();
 	GetRifle()->ResetWeapon();
 	GetRifle()->SeedRandom(Seed);
-	SetDeadState(false);
 	GetCharacterMovement()->StopMovementImmediately();
-	if (bCrouched) { Crouch(); } else { UnCrouch(); }
+	SetSpeedScale(InSpeedScale);
+	ApplyCrouchNow(bCrouched); // after the teleport: the capsule is resized now and the feet stay on the floor
+}
+
+void AScriptedBot::Drive(const FPSBots::FBotIntent& Intent, float DeltaSeconds, float TurnRateDegPerSec)
+{
+	if (!IsAlive())
+	{
+		return;
+	}
+	if (!Intent.MoveDir.IsNearlyZero())
+	{
+		AddMovementInput(FVector(Intent.MoveDir.X, Intent.MoveDir.Y, 0.0), 1.f);
+	}
+	if (Intent.bCrouch != GetCharacterMovement()->bWantsToCrouch)
+	{
+		if (Intent.bCrouch) { Crouch(); } else { UnCrouch(); }
+	}
+	const float Current = GetActorRotation().Yaw;
+	const float Delta = FRotator::NormalizeAxis(Intent.LookYawDeg - Current);
+	const float MaxStep = TurnRateDegPerSec * DeltaSeconds;
+	const FRotator Facing(0.0, FRotator::NormalizeAxis(Current + FMath::Clamp(Delta, -MaxStep, MaxStep)), 0.0);
+	if (AController* C = GetController())
+	{
+		C->SetControlRotation(Facing); // the bean turns with its controller's yaw
+	}
+	SetActorRotation(Facing);
 }
 
 void AScriptedBot::Deactivate()

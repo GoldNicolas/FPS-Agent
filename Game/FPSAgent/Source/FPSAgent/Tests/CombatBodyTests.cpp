@@ -3,6 +3,10 @@
 #include "Arena/MapBuilder.h"
 #include "Bots/ScriptedBot.h"
 #include "Character/BeanAIController.h"
+#include "Bots/BotBrain.h"
+#include "Common/FPSAgentSettings.h"
+#include "Components/CapsuleComponent.h"
+#include "GameFramework/CharacterMovementComponent.h"
 #include "Tests/FPSTestWorld.h"
 
 #if WITH_DEV_AUTOMATION_TESTS
@@ -57,7 +61,8 @@ bool FFPSScriptedBotTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("active"), Bot->IsActive());
 	TestTrue(TEXT("alive"), Bot->IsAlive());
 	TestFalse(TEXT("visible"), Bot->IsHidden());
-	TestTrue(TEXT("placed"), Bot->GetActorLocation().Equals(FVector(500.0, 0.0, 90.0), 1.0));
+	// crouched capsule: the feet stay where the standing spawn put them, so the centre drops by the half-height difference
+	TestTrue(TEXT("placed"), FVector2D(Bot->GetActorLocation()).Equals(FVector2D(500.0, 0.0), 1.0));
 	TestEqual(TEXT("faces yaw 180"), FMath::Abs(static_cast<float>(FRotator::NormalizeAxis(Bot->GetActorRotation().Yaw))), 180.f, 1e-3f);
 	TestTrue(TEXT("wants to crouch"), Bot->GetCharacterMovement()->bWantsToCrouch);
 
@@ -70,6 +75,37 @@ bool FFPSScriptedBotTest::RunTest(const FString& Parameters)
 	TestTrue(TEXT("alive again next episode"), Bot->IsAlive());
 	TestEqual(TEXT("full health"), Bot->GetHealth()->GetHealth(), 100.f);
 	TestFalse(TEXT("standing"), Bot->GetCharacterMovement()->bWantsToCrouch);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSScriptedBotCrouchDriveTest, "FPSAgent.Bots.ScriptedBot.CrouchAndDrive",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSScriptedBotCrouchDriveTest::RunTest(const FString& Parameters)
+{
+	FPSTest::FTestWorld W;
+	FActorSpawnParameters P;
+	P.SpawnCollisionHandlingOverride = ESpawnActorCollisionHandlingMethod::AlwaysSpawn;
+	AScriptedBot* Bot = W.World->SpawnActor<AScriptedBot>(FVector(0.0, 0.0, 100.0), FRotator::ZeroRotator, P);
+	const UFPSAgentSettings& S = UFPSAgentSettings::Get();
+	const double StandZ = S.Body.StandingHalfHeight + 2.0; // the spawn convention: feet 2 cm above the floor top (z = 0)
+
+	Bot->Activate(FVector(0.0, 0.0, StandZ), 0.f, true, 1, 0.6f);
+	TestTrue(TEXT("crouched at once"), Bot->bIsCrouched);
+	TestEqual(TEXT("crouched capsule"), static_cast<float>(Bot->GetCapsuleComponent()->GetUnscaledCapsuleHalfHeight()), S.Body.CrouchedHalfHeight, 0.5f);
+	TestEqual(TEXT("feet stay on the floor"), static_cast<float>(Bot->GetActorLocation().Z), static_cast<float>(S.Body.CrouchedHalfHeight + 2.0), 1.f);
+	TestEqual(TEXT("speed scale"), Bot->GetCharacterMovement()->MaxWalkSpeed, S.Movement.RunSpeed * 0.6f, 0.01f);
+
+	Bot->Activate(FVector(0.0, 0.0, StandZ), 0.f, false, 2, 1.f);
+	TestFalse(TEXT("standing at once"), Bot->bIsCrouched);
+	TestEqual(TEXT("standing height"), static_cast<float>(Bot->GetActorLocation().Z), static_cast<float>(StandZ), 1.f);
+	TestEqual(TEXT("full speed again"), Bot->GetCharacterMovement()->MaxWalkSpeed, S.Movement.RunSpeed, 0.01f);
+
+	FPSBots::FBotIntent I;
+	I.MoveDir = FVector2D(0.0, 1.0);
+	I.LookYawDeg = 90.f;
+	Bot->Drive(I, 0.1f, 360.f);
+	TestTrue(TEXT("move input toward +Y"), Bot->GetPendingMovementInputVector().GetSafeNormal().Equals(FVector(0.0, 1.0, 0.0), 1e-3));
+	TestEqual(TEXT("turns at most 36 deg in 0.1 s at 360 deg/s"), static_cast<float>(Bot->GetActorRotation().Yaw), 36.f, 1e-3f);
 	return true;
 }
 

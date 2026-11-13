@@ -1,6 +1,7 @@
 #pragma once
 
 #include "CoreMinimal.h"
+#include "Bots/BotBrain.h"
 #include "Character/BeanCharacter.h"
 #include "ScriptedBot.generated.h"
 
@@ -19,7 +20,9 @@ public:
 	AScriptedBot(const FObjectInitializer& ObjectInitializer);
 
 	/** New episode: teleport, face YawDeg, full health, alive, crouched or standing. Seed feeds the bot's rifle. */
-	void Activate(const FVector& Location, float YawDeg, bool bCrouched, int32 Seed);
+	void Activate(const FVector& Location, float YawDeg, bool bCrouched, int32 Seed, float InSpeedScale = 1.f);
+	/** Applies one tick of the brain's intent: movement input, crouch and body yaw (turning at TurnRateDegPerSec). Dead or inactive bots ignore it. */
+	void Drive(const FPSBots::FBotIntent& Intent, float DeltaSeconds, float TurnRateDegPerSec);
 	/** Not in this episode: hidden, no collision, no movement. */
 	void Deactivate();
 	bool IsActive() const { return bActive; }
