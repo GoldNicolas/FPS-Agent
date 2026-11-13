@@ -10,6 +10,7 @@
 #include "LearningAgentsNeuralNetwork.h"
 #include "LearningAgentsTrainer.h"
 #include "LearningAgentsTrainingEnvironment.h"
+#include "LearningNeuralNetwork.h"
 #include "Misc/CommandLine.h"
 #include "Misc/OutputDeviceRedirector.h"
 #include "Misc/Parse.h"
@@ -56,7 +57,7 @@ bool UTrainingSession::Setup(ULearningAgentsManager& Manager, const FTrainingSes
 	}
 	if (!Config.ResumeFrom.IsEmpty() && !LoadSnapshots(Config.ResumeFrom))
 	{
-		ExitProcess(Config.LogPrefix, 2, TEXT("-ResumeFrom is missing snapshot files"));
+		ExitProcess(Config.LogPrefix, 2, TEXT("-ResumeFrom snapshots are missing or don't match this build's network"));
 		return false;
 	}
 	if (Config.bInfer)
@@ -151,11 +152,38 @@ bool UTrainingSession::LoadSnapshots(const FString& Dir)
 			return false;
 		}
 	}
+	// Learning Agents' LoadFromSnapshot overwrites the network's sizes and compatibility hash without comparing them, so a snapshot
+	// from another build or network setting would "load" and then score 0. Compare before and after; a mismatch is a bad argument (exit 2).
+	struct FShape { int32 In = 0; int32 Out = 0; int32 Hash = 0; bool bKnown = false; };
+	auto ShapeOf = [](const ULearningAgentsNeuralNetwork* Network)
+	{
+		FShape S;
+		if (Network && Network->NeuralNetworkData)
+		{
+			S.In = Network->NeuralNetworkData->GetInputSize();
+			S.Out = Network->NeuralNetworkData->GetOutputSize();
+			S.Hash = Network->NeuralNetworkData->GetCompatibilityHash();
+			S.bKnown = S.In > 0 || S.Out > 0;
+		}
+		return S;
+	};
+	TArray<FShape> Before;
 	for (const TPair<FString, ULearningAgentsNeuralNetwork*>& Item : Items)
 	{
+		Before.Add(ShapeOf(Item.Value));
+	}
+	for (int32 i = 0; i < Items.Num(); ++i)
+	{
 		FFilePath File;
-		File.FilePath = FPaths::Combine(Dir, Item.Key);
-		Item.Value->LoadNetworkFromSnapshot(File);
+		File.FilePath = FPaths::Combine(Dir, Items[i].Key);
+		Items[i].Value->LoadNetworkFromSnapshot(File);
+		const FShape After = ShapeOf(Items[i].Value);
+		if (Before[i].bKnown && (After.In != Before[i].In || After.Out != Before[i].Out || After.Hash != Before[i].Hash))
+		{
+			UE_LOG(LogFPSAgent, Error, TEXT("%s: snapshot %s doesn't match this build's network (inputs %d vs %d, outputs %d vs %d, hash %d vs %d). Resume only snapshots from the same build and network settings."),
+				*Config.LogPrefix, *File.FilePath, After.In, Before[i].In, After.Out, Before[i].Out, After.Hash, Before[i].Hash);
+			return false;
+		}
 	}
 	UE_LOG(LogFPSAgent, Display, TEXT("%s: loaded %d snapshots from %s"), *Config.LogPrefix, Items.Num(), *Dir);
 	return true;
