@@ -205,7 +205,7 @@ eval)
   if [ "$SCRIPTED" = 1 ]; then WHO=(-Scripted); else
     [ -n "$RESUME_FROM" ] || { echo "MODE=eval needs RESUME_FROM (or SCRIPTED=1)"; exit 2; }
     WHO=(-ResumeFrom="$RESUME_FROM"); fi
-  D=$RUN/eval_$([ "$SCRIPTED" = 1 ] && echo scripted || echo policy)_l${START_DIFFICULTY:-0}_s${SEED}_k${ARENAS}
+  D=$RUN/eval_$([ "$SCRIPTED" = 1 ] && echo scripted || echo policy)_l${START_DIFFICULTY:-0}_s${SEED}_k${ARENAS}_j$SLURM_JOB_ID   # job id: a rerun never reuses a folder
   single "$D" "$EVAL_LIMIT" -Stage=S0 -Arenas="$ARENAS" -Seed="$SEED" -Eval -EvalEpisodes="$EVAL_EPISODES" \
     -StartDifficulty="${START_DIFFICULTY:-0}" "${WHO[@]}" "${SETARG[@]}" -EvalJson="$D/eval.json"
   "${REPORT[@]}" step "$D" | tee "$D/summary.md"
