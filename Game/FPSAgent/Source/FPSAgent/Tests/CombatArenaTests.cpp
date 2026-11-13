@@ -195,4 +195,63 @@ bool FFPSCombatArenaFairnessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatArenaS1Test, "FPSAgent.Combat.Arena.S1",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatArenaS1Test::RunTest(const FString& Parameters)
+{
+	FPSTest::FTestWorld W;
+	TStrongObjectPtr<UCombatArena> A(NewObject<UCombatArena>(GetTransientPackage()));
+	A->Build(W.World, 0, FVector::ZeroVector, 7, /*StageIndex=*/1);
+	TestEqual(TEXT("S1 arena"), A->GetStageIndex(), 1);
+
+	FPSCurriculum::FCombatEpisode E;
+	E.Map = A->GetBaseSpec();
+	const int32 Mid = E.Map.Rows() / 2;            // 11 on the 22 x 22 S1 floor
+	E.Map.Tiles[Mid - 3][Mid] = TEXT('h');          // world centre (1000, 200): a high block north of the agent
+	E.Map.Tiles[Mid][Mid + 3] = TEXT('l');          // world centre (-200, 1400): a low block east of the agent
+	E.AgentYawDeg = 0.f;
+	FPSCurriculum::FBotSpawn Patrol;
+	Patrol.Offset = FVector2D(800.0, 800.0);
+	Patrol.YawDeg = 45.f;                            // facing away from the agent: it can't see it
+	Patrol.Behaviour = FPSBots::EBotBehaviour::Patrol;
+	FPSCurriculum::FBotSpawn Static;
+	Static.Offset = FVector2D(-800.0, 0.0);
+	Static.Behaviour = FPSBots::EBotBehaviour::Static;
+	E.Bots = { Patrol, Static };
+	A->StartEpisode(E, 11, 0.0);
+
+	TestEqual(TEXT("two cover blocks placed"), A->GetVisibleCoverCount(), 2);
+	TestFalse(TEXT("high cover blocks sight (moved pool block has collision)"), FPSPerception::HasLineOfSight(W.World, FVector(500.0, 200.0, 100.0), FVector(1500.0, 200.0, 100.0)));
+	TestFalse(TEXT("low cover blocks at 1 m"), FPSPerception::HasLineOfSight(W.World, FVector(-200.0, 1000.0, 100.0), FVector(-200.0, 1800.0, 100.0)));
+	TestTrue(TEXT("low cover is clear above 1.2 m"), FPSPerception::HasLineOfSight(W.World, FVector(-200.0, 1000.0, 150.0), FVector(-200.0, 1800.0, 150.0)));
+
+	A->TickAction(1.f / 60.f);
+	TestFalse(TEXT("the patrol bot walks"), A->GetBot(0)->GetPendingMovementInputVector().IsNearlyZero());
+	TestTrue(TEXT("the static bot holds"), A->GetBot(1)->GetPendingMovementInputVector().IsNearlyZero());
+
+	A->GetAgent()->GetRifle()->FireShot(0);
+	bool bGunshot = false;
+	for (const FPSBots::FSoundEvent& S : A->GetSounds()) { bGunshot |= S.Kind == FPSBots::ESoundKind::Gunshot && S.Source == INDEX_NONE; }
+	TestTrue(TEXT("the agent's shot is a sound event"), bGunshot);
+	A->PrepareDecision(0.1);
+	TestFalse(TEXT("not before the reaction delay"), A->GetBotBrain(0).IsInvestigating());
+	A->PrepareDecision(0.6);
+	TestTrue(TEXT("the patrol bot investigates the shot it heard"), A->GetBotBrain(0).IsInvestigating());
+
+	FPSBots::FSoundEvent Step;
+	Step.Position = FVector(0.0, 1000.0, 100.0);
+	Step.Time = 0.55;
+	Step.Kind = FPSBots::ESoundKind::Footstep;
+	Step.Source = 0;
+	A->EmitSound(Step);
+	FPSCombatObs::FObservationData O;
+	A->BuildObservation(O, 0.6);
+	TestEqual(TEXT("the agent hears one enemy sound"), O.Sounds.Num(), 1);
+	if (O.Sounds.Num() == 1)
+	{
+		TestTrue(TEXT("...to its right (+Y at yaw 0)"), O.Sounds[0][1] > 0.9f);
+	}
+	return true;
+}
+
 #endif
