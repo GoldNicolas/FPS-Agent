@@ -5,6 +5,7 @@
   - Changes from now on are recorded in this file and in `docs/decisions.md`.
   - Build A (S0) implemented 2026-11-12 (plan `docs/superpowers/plans/2026-11-12-combat-build-a-s0.md`); shipped as the build in `docs/builds.md`.
   - Build A clarification on `-Eval`: each arena plays a fixed share of the episodes (N/K, plus one for the first N mod K), so the clear rate is not biased toward quick clears.
+  - **Build B (S1) implemented 2026-11-13** (plan `docs/superpowers/plans/2026-11-13-combat-build-b-s1.md`; design rulings D-031); shipped as the build in `docs/builds.md`. Additions: the promotion trigger also needs the gate-level clear rate `clearTop` (below), and the stats log the bots' mean speed (`botSpeed`).
 - **Side:** LOCAL (game). CLUSTER runs the training.
 - **Research behind it:** [`docs/research/rl-reward-and-optimization.md`](../../research/rl-reward-and-optimization.md).
 - **Builds on:** README → *RL design* (observations, actions, reward table, curriculum) and → *Scripted bots*. Spike A ([`docs/spikes/A-learning-agents-linux.md`](../../spikes/A-learning-agents-linux.md)) proved the pipeline. D-022 sets the episode-end rule.
@@ -208,7 +209,7 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 - **Logging:** the mean, min and max L across arenas, in every stats line and the CSV.
 
 **Promotion**
-- **Trigger:** the mean L stays ≥ 0.9 over the last 10 stats windows. The run report says so.
+- **Trigger:** the mean L stays ≥ 0.9 **and** the gate-level clear rate `clearTop` (non-review episodes at L ≥ 0.95) stays ≥ the gate, over the last 10 stats windows (D-031, build B; `clearTop` is pooled over those windows and all games). The run report says so.
 - **Gate:** CLUSTER runs `-Eval -Stage=Sn -StartDifficulty=1`: 200 fixed-seed episodes, no training, mean actions.
 - **Pass:** clear rate ≥ 70% (a per-stage setting). The snapshot is then published as `run-<id>` and the next stage starts from it at L = 0.
 

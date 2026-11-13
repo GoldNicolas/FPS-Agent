@@ -200,16 +200,29 @@ The weapon is **hitscan**. Recoil and spread use a **seeded RNG per episode**, s
 ### Scripted bots (training opponents)
 Bots are modelled on a shooting-range setup but grow into real opponents as training progresses:
 
-| Mode | Behavior |
-|---|---|
-| Static | Stands still |
-| Strafe | ADAD strafing with a random period |
-| Peek | Peeks out from cover and back |
-| Crouch | Crouch-spams |
-| Shooter | Any of the above, and shoots back |
-| Hunter | Roams the nav mesh, holds angles, engages on sight. The most agent-like bot, there to prepare agents for the deathmatch. |
+| Mode | Behavior | Since |
+|---|---|---|
+| Static | Stands still | S0 |
+| Strafe | ADAD strafing with a random period (0.3–0.9 s, ±2.5 m) | S1 |
+| Peek | Steps between a hidden and an exposed tile next to cover (dwell 0.8–2 s). Without a hidden/exposed pair it strafes (D-031) | S1 |
+| Crouch | Crouch-spams (0.3–1.2 s) | S1 |
+| Patrol | Walks a loop of 4 waypoints with short pauses | S1 |
+| Explore | Walks to the least recently visited of 6 candidate tiles | S1 |
+| Shooter | Any of the above, and shoots back | S2 (build C) |
+| Hunter | Roams the map, holds angles, engages on sight. The most agent-like bot, there to prepare agents for the deathmatch. | S3 |
 
-Difficulty settings are reaction time, aim error (degrees), tracking speed, burst discipline, strafe frequency and HP. They are randomized within each curriculum stage's range.
+**As built in build B (S1):**
+- **Movement.** Bots walk on a tile graph (`Arena/TileGraph`, A* with deterministic tie-breaks, a port of `tools/mapgen` `grid.py`) with small seeded offsets on each path point. They turn at 360°/s and move at the stage's speed scale (60% → 100% of run speed).
+- **Senses** (`Bots/BotSenses`) use the agent's rules (hard rule 4, D-024):
+  - **Sight:** a 103° view cone and line of sight to the agent, with a 0.4 s reaction delay.
+  - **Hearing:** gunshots within 40 m, and running footsteps within 15 m (one every 0.35 s). Walking, crouching and standing are silent.
+  - **Noise:** a seeded 2 m position noise on what they hear.
+  - **Timing:** bots sense at the agent's 15 Hz decision rate, all on the same decision (not staggered across bots, which has no effect on behaviour at 15 Hz). Their brains tick at 60 Hz.
+- **Investigate.** A seen or heard agent makes Patrol and Explore bots walk to the stimulus and look around for 3 s. The other modes turn to face it and hold their spot (D-031).
+- **Episode setup.** Bots spawn facing away from the agent, so the agent is outside every view cone at the start (D-031).
+- **S0 is unchanged:** static, non-reacting bots, exactly as in build A.
+
+Planned difficulty settings for later stages: reaction time, aim error (degrees), tracking speed, burst discipline and HP, randomized within each curriculum stage's range. Every value above is a setting (`UFPSAgentSettings` → `Bots`, `Curriculum.S1`) with a source or verify note (hard rule 7).
 
 ### Arenas and episodes
 - Each game process hosts **K isolated arena instances**, spaced far apart in the same world. Each arena holds **one learning agent plus its bots**.
@@ -324,7 +337,7 @@ This is also better for RL. Randomized original layouts keep the agent from memo
 | Self | Velocity (local frame), grounded, crouched, health, armor, ammo fraction, reloading, current spread, recoil state / time since last shot, aim pitch |
 | Geometry | Fan of about 72 ray casts from eye height (e.g. 24 yaw × 3 pitch), normalized distance and hit type |
 | Enemies (set, up to 5) | Only enemies that pass a **line-of-sight check** (traces to head and chest, inside the 103° × 70.5° view cone), or were seen in the last ~2 s (flagged as "remembered"). For each (15 values): relative position in the local frame, distance, **aim error to the head** (yaw and pitch: coarse /180° plus a fine channel /5° clamped to ±1, D-028), relative velocity, whether it is facing the agent, crouched, visible or remembered, age |
-| Hit indicator, hearing (D-024) | Direction of damage taken. Enemy gunshots and footsteps within a radius: direction, rough distance, age (the same rules the bots use). Full layout: `docs/superpowers/specs/2026-11-12-combat-training-design.md` §2 |
+| Hit indicator, hearing (D-024, D-031) | Direction of damage taken. Enemy gunshots (40 m) and running footsteps (15 m) within a radius: direction, rough distance, age. The bots use the same rules. Each sound carries a seeded 2 m position noise, drawn once when it is made, so distance and direction are rough. The agent hears the newest 4 enemy sounds of the last 1 s, never its own. Full layout: `docs/superpowers/specs/2026-11-12-combat-training-design.md` §2 |
 
 ### Actions
 - Movement on 2 continuous axes (forward/back, left/right)
@@ -355,11 +368,13 @@ Every weight lives in config, so sweeps can tune them.
 | Stage | Setup | Learns |
 |---|---|---|
 | **S0 Aim gallery** | Agent can't move. Static bots at random distances and angles. | Aim and timing of shots |
-| **S1 Movers** | Strafe / peek / crouch bots. Agent can move. | Tracking. Counter-strafing (stop before shooting to be accurate) |
+| **S1 Movers** (build B) | Agent can move. 1 → 5 bots that strafe, peek or crouch, plus patrol and explore toward level 1, at 60 → 100% speed. Cover from 0 to 12% of the tiles (half low, half high), new each episode. Hearing. 30 s episodes. Bots don't shoot yet. | Tracking. Counter-strafing (stop before shooting to be accurate). Finding bots behind cover |
 | **S2 Duels** | Bots shoot back. Difficulty ramps (reaction time 600 → 200 ms) | Trading damage, using cover, peeking |
 | **S3 Full-map hunt** | Random map variants, random spawns, several bots including Hunters | Searching for and finding enemies, angles, fighting while moving |
 
-Each stage is a new training run that starts from the previous stage's best snapshot. A stage is promoted when it hits a threshold (for example kill rate and damage per life), measured against a fixed set of evaluation seeds.
+Each stage is a new training run that starts from the previous stage's best snapshot. Promotion has two steps:
+- **Trigger:** the mean ramp level stays ≥ 0.9 **and** the gate-level clear rate `clearTop` stays ≥ the gate (70%) over the last 10 stats windows (D-031). `clearTop` is the clear rate of non-review episodes played at level ≥ 0.95.
+- **Gate:** `-Eval` at level 1 on a fixed set of evaluation seeds; pass when the clear rate is ≥ 70%.
 
 ### Learning Agents classes (C++)
 The Epic course uses Blueprints on 5.5; we port to C++ on 5.7. The expected classes are `ULearningAgentsManager`, `ULearningAgentsInteractor`, `ULearningAgentsTrainingEnvironment`, `ULearningAgentsPolicy`, `ULearningAgentsCritic`, `ULearningAgentsPPOTrainer` and `ULearningAgentsCommunicatorLibrary`. **Verify names and signatures against the 5.7 headers** before writing code. The course author says the 5.5 → 5.6 changes were minor.
@@ -584,10 +599,11 @@ Ours are parsed in `Common/FPSRunArgs` and logged at startup (`ArenaGameMode: ..
 
 | Argument | Meaning |
 |---|---|
-| `-Stage=S0` | **Combat stage S0 (aim gallery)**: `-Arenas` generated 80 m floors, one agent plus 1-5 static bots each, 15 decisions per second (D-023), automatic difficulty ramp per arena. Trains against the external trainer unless `-Infer` / `-Eval` / `-Scripted`. S1-S3 come in later builds (asking for them exits with code 2). No `-Stage` = the play arena (range or map). |
+| `-Stage=S0` | **Combat stage S0 (aim gallery)**: `-Arenas` generated 80 m floors, one agent plus 1-5 static bots each, 15 decisions per second (D-023), automatic difficulty ramp per arena. Trains against the external trainer unless `-Infer` / `-Eval` / `-Scripted`. S2-S3 come in later builds (asking for them exits with code 2). No `-Stage` = the play arena (range or map). |
+| `-Stage=S1` | **Combat stage S1 (Movers, build B)**: the same floors, 15 decisions/s and per-arena ramp. The agent can move, and episodes last 30 s. Each episode brings new seeded cover (0 → 12% of the tiles, half low, half high, the floor always stays connected), 1 → 5 bots (strafe, peek, crouch, then patrol and explore toward level 1; 60 → 100% speed; spawned facing away) and hearing (D-031). Bots don't shoot yet (S2). S0 snapshots load into S1 (same network). |
 | `-StartDifficulty=X` | Initial ramp level of every arena, 0-1 (default 0). Chained jobs pass the last logged mean `level=`. |
-| `-Eval` | Promotion test (implies `-Infer`): `-EvalEpisodes=N` (default 200) fixed-seed episodes at `-StartDifficulty`, mean actions, no ramp, no review episodes. Each arena plays a fixed share of the N episodes (N/K, plus one for the first N mod K), so slow episodes are never dropped. The episode seeds depend on `-Seed` **and** `-Arenas`, so compare snapshots with the same pair. Writes `-EvalJson=<path>`, logs `CombatEval: {...}`, exits 0. Needs `-ResumeFrom` unless `-Scripted`. Resume only snapshots made by the same build and network settings: a mismatched snapshot loads without an error and then scores 0. |
-| `-StatsCsv=<path>` | One CSV row per stats window: clear/death/timeout rates, average return, every reward term, accuracy, headshot rate, clear time, ramp level (mean/min/max), decisions/s. Appends; the header is written only when the file is new or empty. `gameTime` restarts at 0 in each chained job. |
+| `-Eval` | Promotion test (implies `-Infer`): `-EvalEpisodes=N` (default 200) fixed-seed episodes at `-StartDifficulty`, mean actions, no ramp, no review episodes. Each arena plays a fixed share of the N episodes (N/K, plus one for the first N mod K), so slow episodes are never dropped. The episode seeds depend on `-Seed` **and** `-Arenas`, so compare snapshots with the same pair. Writes `-EvalJson=<path>`, logs `CombatEval: {...}`, exits 0. Needs `-ResumeFrom` unless `-Scripted`. Resume only snapshots with the same network: a mismatched snapshot exits with code 2 (see `-ResumeFrom`). |
+| `-StatsCsv=<path>` | One CSV row per stats window: clear/death/timeout rates, average return, every reward term, accuracy, headshot rate, clear time, ramp level (mean/min/max), decisions/s, then (build B, appended last) `clearRateTop`, `episodesTop` and `botSpeed`. Appends; the header is written only when the file is new or empty, so start a new file when the build adds columns. `gameTime` restarts at 0 in each chained job. |
 | `-Set=Path=Value;...` | Override any setting at startup, e.g. `-Set="Combat.Reward.Kill=1.5;Combat.Ppo.Discount=0.997"` (D-025). Logged as `Settings overrides (-Set): ...`. An unknown path or bad value exits with code 2. Changing ray counts or network sizes changes the network, so older snapshots can't be resumed. `Body.*` values are read by the bean constructor before `-Set` applies, so they only partly take effect: change them in config instead. |
 | `-Stage=SpikeC` | Headless mechanics probe (C-006): one bean runs, walks and crouches (speed over the last second of each 3 s phase), then holds the trigger (rounds/s over 20 shots) and taps 8 times. Logs `SpikeC probe: run=... (cfg ...) ... verdict=PASS\|MISMATCH` and exits 0. |
 | `-Stage=SpikeA` | Toy reach task: `-Arenas` walled floors, one bean agent each, walking to random targets. Trains against the external trainer unless `-Infer` is given. |
@@ -595,21 +611,21 @@ Ours are parsed in `Common/FPSRunArgs` and logged at startup (`ArenaGameMode: ..
 | `-Arenas=K` | Arenas (= agents) in this process. Default 1. |
 | `-Map=range\|map01\|gen_007\|pool` | Play arena when not in a training stage. |
 | `-Infer` | Play the policy back, no trainer (mean actions). Headless it uses the same fixed 60 Hz step as training. |
-| `-Scripted` | (implies `-Infer`) A reference agent instead of the policy. SpikeA: walks straight to the target. S0: turns to the nearest visible enemy at the turn-rate cap and fires when on the head. Same senses as the policy. |
-| `-ResumeFrom=<dir>` | Load `encoder/policy/decoder.bin` (+ `critic.bin` when training) from `<dir>` before starting. A missing file exits with code 2. |
+| `-Scripted` | (implies `-Infer`) A reference agent instead of the policy. SpikeA: walks straight to the target. S0: turns to the nearest visible enemy at the turn-rate cap and fires when on the head. S1: the same when an enemy is in sight; otherwise it explores the floor and walks toward the newest enemy sound it hears. Same senses as the policy. |
+| `-ResumeFrom=<dir>` | Load `encoder/policy/decoder.bin` (+ `critic.bin` when training) from `<dir>` before starting. A missing file exits with code 2, and so does a snapshot whose network doesn't match this build (input size, output size and compatibility hash are compared; the log names both sides). |
 | `-Batches=N` | **Preferred run length.** The trainer stops after N experience batches; the games then exit with code 0. One batch = one round of experience from the games, then `IterationsPerGather` (32) gradient iterations, so this sets `IterationNum = N × 32`. Wins over `-Iterations`. |
 | `-Iterations=N` | The same, counted in **gradient iterations** (32 per batch, C-005): `-Iterations=150` is under 5 batches. Default when neither is given: `SpikeA.MaxIterations` in settings. |
 
 Engine flags we rely on: `-nullrhi -nosound -unattended`, `-LearningAgentsUseExternalTrainingProcess` (implied: the game never spawns a trainer itself), `-LearningAgentsIpAddress=` / `-LearningAgentsHostname=`, `-LearningAgentsPort=`, `-LearningAgentsTimeout=`, `-abslog=`.
 
-**Game exit codes (training stages):** `0` = the trainer finished or `-Eval` completed · `1` = trainer unreachable, timed out or crashed · `2` = bad arguments (`-ResumeFrom` files, `-Set`, a stage not in this build, `-Eval` without snapshots). The Linux build returns these codes. On Windows, an early non-forced exit can return 0 even though the log says `exiting (code 2)`, so local checks read the log line.
+**Game exit codes (training stages):** `0` = the trainer finished or `-Eval` completed · `1` = trainer unreachable, timed out or crashed · `2` = bad arguments (`-ResumeFrom` files missing or of another network, `-Set`, a stage not in this build, `-Eval` without snapshots). The Linux build returns these codes. On Windows, an early non-forced exit can return 0 even though the log says `exiting (code 2)`, so local checks read the log line.
 
 **Game log lines to grep:**
 - `SpikeA: ready. ...`: settings in effect.
 - `SpikeA stats: gameTime=... episodes=... reached=...% avgReturn=... agentSteps/s(wall)=...`: every 10 s of game time.
 - `SpikeA: exiting (code N): ...`
 - `Combat: ready. ...` and `Combat: ppo ...`: S0 settings in effect. `Combat: trainer settings: ...`: what the trainer was sent.
-- `CombatStats: gameTime=... episodes=... clear=..% died=..% timeout=..% avgReturn=... kills/ep=... acc=..% hs=..% clearTime=..s level=mean(min..max) decisions/s(wall)=... terms: DamageDealt=... Kill=... FirstSighting=... Clear=... AimHelper=... DamageTaken=... Death=... Miss=... Time=...`: every 10 s of game time.
+- `CombatStats: gameTime=... episodes=... clear=..% died=..% timeout=..% avgReturn=... kills/ep=... acc=..% hs=..% clearTime=..s level=mean(min..max) decisions/s(wall)=... clearTop=..%(n=..) botSpeed=..cm/s terms: DamageDealt=... Kill=... FirstSighting=... Clear=... AimHelper=... DamageTaken=... Death=... Miss=... Time=...`: every 10 s of game time.
 - `CombatEval: {json}`: the `-Eval` result (the same JSON as `-EvalJson`).
 - `Combat: exiting (code N): ...`
 - `SpikeC probe: ...` and `SpikeC: exiting (code 0): probe finished: PASS|MISMATCH`.
