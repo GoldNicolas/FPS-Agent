@@ -527,7 +527,7 @@ These are the official Learning Agents scale-out flags from Epic's *Scaling Out 
 #SBATCH -N 1
 #SBATCH -p gpuq                     # docs/cradle.md
 #SBATCH --gres=gpu:1
-#SBATCH --cpus-per-task=8           # ~2 cores per game process (Spike B, D-027)
+#SBATCH --cpus-per-task=8           # 4 games: ~2 cores in training, ~6 at full speed (Spike B, D-027/D-030)
 #SBATCH --mem=<GB>G                 # not enforced (CR_CORE), but documents the need
 #SBATCH --time=<hh:mm:ss>           # always set: gpuq has no time limit
 #SBATCH --signal=B:USR1@300         # warning before walltime, so we can stop cleanly
@@ -538,7 +538,7 @@ REPO=~/beanRant/FPS-Agent
 BUILD=~/beanRant/builds/$BUILD_SHA/Linux
 RUN=~/beanRant/runs/$SLURM_JOB_ID; mkdir -p "$RUN"
 PORT=$((40000 + SLURM_JOB_ID % 20000))     # unique per job: no collisions
-NUM_GAMES=${NUM_GAMES:-4}                   # Spike B / D-027: the trainer, not the games, sets the pace
+NUM_GAMES=${NUM_GAMES:-4}                   # Spike B / D-027, D-030: the trainer, not the games, sets the pace
 ARENAS=${ARENAS:-32}                        # arenas (= agents) per process; K x episode length must fit MaxStepNum
 
 unset PYTHONPATH PYTHONHOME VIRTUAL_ENV            # inherited from the login shell (docs/cradle.md)

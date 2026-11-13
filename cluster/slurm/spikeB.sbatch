@@ -145,7 +145,7 @@ PYEOF
     SPEC=${C%%:*}; OPTS=${C#"$SPEC"}
     N=${SPEC%x*}; BS=${SPEC#*x}
     DEV=gpu; [[ $OPTS == *:cpu* ]] && DEV=cpu
-    POLL=stock; TDIR=$STOCK; [[ $OPTS == *:poll* ]] && { POLL=patched; TDIR=$PATCHED; }
+    POLL=pinned; TDIR=$STOCK; [[ $OPTS == *:poll* ]] && { POLL=patched; TDIR=$PATCHED; }   # pinned = the repo copy (D-029 polls since c5784a5)
     D=$RUN/train_$(printf %02d "$IDX")_n${N}_bs${BS}_${DEV}$([ "$POLL" = patched ] && echo _poll); mkdir -p "$D"
     PORT=$((PORT0 + IDX)); SEED0=$((SLURM_JOB_ID * 1000 + IDX * 50)); IDX=$((IDX + 1))
     echo "config=$C n=$N batch_size=$BS arenas=$ARENAS batches=$BATCHES port=$PORT seed0=$SEED0 device=$DEV poll=$POLL stage=$STAGE" > "$D/info.txt"

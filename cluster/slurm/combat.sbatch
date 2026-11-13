@@ -17,8 +17,8 @@
 #   mkdir -p ~/beanRant/logs
 #   S=~/beanRant/FPS-Agent/cluster/slurm/combat.sbatch
 #   sbatch -t 30 --export=ALL,MODE=smoke $S
-#   J=$(sbatch --parsable --export=ALL,MODE=train,RUN_ID=s0-<date>-a,BATCHES=200 $S)              # first job
-#   sbatch --dependency=afterany:$J --export=ALL,MODE=train,RUN_ID=s0-<date>-a,BATCHES=200 $S     # next ones
+#   J=$(sbatch --parsable --export=ALL,MODE=train,NUM_GAMES=4,ARENAS=32,BATCHES=300 $S)          # first job: S0-<date>-$J
+#   sbatch --dependency=afterany:$J --export=ALL,MODE=train,RUN_ID=S0-<date>-$J,NUM_GAMES=4,ARENAS=32,BATCHES=300 $S  # next ones
 #   sbatch --gres=none -c 4 -t 30 --export=ALL,MODE=eval,RESUME_FROM=<dir>,START_DIFFICULTY=1,SEED=1000 $S
 #   sbatch --gres=none -c 4 -t 30 --export=ALL,MODE=eval,SCRIPTED=1,START_DIFFICULTY=1,SEED=1000 $S
 #   sbatch --gres=none -c 2 -t 10 --export=ALL,MODE=probe $S
@@ -49,13 +49,15 @@ EVAL_LIMIT=${EVAL_LIMIT:-1800}    # eval: stop the game after this many seconds
 PROMOTE_LEVEL=${PROMOTE_LEVEL:-0.9}
 PROMOTE_WINDOWS=${PROMOTE_WINDOWS:-10}
 GAME_STDOUT=${GAME_STDOUT:-0}     # 1: keep each game's stdout (it repeats the log) in game_<i>.stdout
+GZIP_LOGS=${GZIP_LOGS:-1}         # train: gzip the game logs at the end of the job (after the summary)
+LOGCMDS=${LOGCMDS:-}              # train: passed as -LogCmds=..., e.g. "LogLearning Warning" hides Learning Agents' Display lines
 CONNECT_TIMEOUT=${CONNECT_TIMEOUT:-120}
 
 BEAN=$HOME/beanRant
 REPO=$BEAN/FPS-Agent
 BUILD=$BEAN/builds/$BUILD_SHA/Linux
 case $MODE in
-  train) RUN_ID=${RUN_ID:-s0-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
+  train) RUN_ID=${RUN_ID:-S0-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;   # docs/runs/README.md convention
   eval)  RUN_ID=${RUN_ID:-s0eval-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
   *)     RUN_ID=${RUN_ID:-s0$MODE-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
 esac
@@ -83,6 +85,7 @@ T0=$(date +%s)
 BASE=(-nullrhi -nosound -unattended)
 TRAINER_ARGS() { echo -LearningAgentsUseExternalTrainingProcess -LearningAgentsIpAddress=127.0.0.1 -LearningAgentsPort="$1" -LearningAgentsTimeout="$CONNECT_TIMEOUT"; }
 SETARG=(); [ -n "$SET" ] && SETARG=(-Set="$SET")
+LOGARG=(); [ -n "$LOGCMDS" ] && LOGARG=(-LogCmds="$LOGCMDS")
 
 # Stop handling: USR1 (5 min before the time limit) or TERM (scancel) asks the current games to quit
 # (the engine shuts down cleanly on SIGTERM); the step then finishes normally and keeps its snapshots.
@@ -139,7 +142,7 @@ train_step() {
   for i in $(seq 0 $((NUM_GAMES - 1))); do
     OUT=/dev/null; [ "$GAME_STDOUT" = 1 ] && OUT=$D/game_$i.stdout
     HOME=$GAME_HOME "$BUILD/FPSAgent.sh" "${BASE[@]}" -Stage=S0 -Arenas="$ARENAS" -Seed=$((SLURM_JOB_ID * 1000 + i)) \
-      -Batches="$B" ${R:+-ResumeFrom="$R"} -StartDifficulty="$L" -StatsCsv="${CSVP}_$i.csv" "${SETARG[@]}" \
+      -Batches="$B" ${R:+-ResumeFrom="$R"} -StartDifficulty="$L" -StatsCsv="${CSVP}_$i.csv" "${SETARG[@]}" "${LOGARG[@]}" \
       $(TRAINER_ARGS "$P") -abslog="$D/game_$i.log" > "$OUT" 2>&1 &
     GAMES+=($!)
   done
@@ -195,6 +198,8 @@ train)
   echo "job=$SLURM_JOB_ID ok=$OK batches=$BATCHES iters=$(grep -c 'Iter:' "$JOB/trainer.log") start_difficulty=$START_DIFFICULTY end_level=$END_LEVEL promoted=$PROMOTED windows=$WINDOWS stopped=$STOPPED games=$(IFS=,; echo "${GAME_RCS[*]}") snapshots=${SNAP:-none} resume_from=${RESUME_FROM:-none} end=$(date -Is)" \
     | tee -a "$RUN/chain.txt"
   "${REPORT[@]}" step "$JOB" | tee "$JOB/summary.md"
+  echo "game log sizes: $(du -ch "$JOB"/game_*.log 2>/dev/null | tail -1 | cut -f1)"
+  [ "$GZIP_LOGS" = 1 ] && gzip -q "$JOB"/game_*.log
   ;;
 eval)
   if [ "$SCRIPTED" = 1 ]; then WHO=(-Scripted); else

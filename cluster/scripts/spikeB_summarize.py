@@ -117,7 +117,9 @@ def summarize_sim(run):
     for d in sorted(glob.glob(os.path.join(run, "sim_n*_k*")), key=lambda p: tuple(int(x) for x in re.findall(r"\d+", os.path.basename(p)))):
         info = read_info(d)
         n, k = int(info["n"]), int(info["k"])
-        rates = [r for r in (steady_rate(*game_stats(p)[:3]) for p in glob.glob(os.path.join(d, "game_*.log"))) if r]
+        stats = [game_stats(p) for p in glob.glob(os.path.join(d, "game_*.log"))]
+        rates = [r for r in (steady_rate(*g[:3]) for g in stats) if r]
+        hz = stats[0][1] if stats else 60.0  # steps per game second per arena: 60 SpikeA, 15 S0
         engines = {pid: s for pid, s in cpu_samples(d).items() if "Binaries/Linux/FPSAgent " in s[0][4]}
         c = [x for x in (cores(s) for s in engines.values()) if x is not None]
         rss = [max(x[2] for x in s) / 1024 for s in engines.values()]
@@ -127,7 +129,7 @@ def summarize_sim(run):
         rows.append({
             "n": n, "k": k, "level": info.get("level", ""), "agents": n * k, "processes_measured": len(rates),
             "total_steps_s": total, "per_process_steps_s": per,
-            "ticks_s": per / k if per else None, "game_s_per_wall_s": per / k / 60 if per else None,
+            "ticks_s": per / k if per else None, "game_s_per_wall_s": per / k / hz if per else None,
             "cores_per_process": statistics.fmean(c) if c else None, "cores_total": sum(c) if c else None,
             "steps_s_per_core": total / sum(c) if total and c else None,
             "rss_mb_per_process": statistics.fmean(rss) if rss else None, "threads_per_process": max(thr) if thr else None,

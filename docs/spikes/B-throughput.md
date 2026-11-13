@@ -9,6 +9,7 @@
 - Question (README → Roadmap): how fast is each process, and which N (processes) × K (arenas) works best? The user also asked to include `--batch-size` = number of games.
 - L-006 adds the trainer side: batch size, experience per update, GPU vs CPU, seconds per batch.
 - Pass criterion: a table of steps/s against N and K on one node, and a chosen default.
+- **Rerun on combat build A (`build-10520b5`, S0), L-007 (2), 2026-11-12:** jobs **152032–152034** (training; K = 8, 16, 32 arenas, each with N = 4, 8, 16 games and `--batch-size N`; 40 cores and 1 A100 each, on `gpu002`, `gpu003`, `gpu005`) and **152035** (simulation, CPU only, `gpu006`). Pinned trainer with the D-029 polls. See [*Combat build A*](#combat-build-a-build-10520b5-s0-l-007-2) below; the default is **D-030**.
 
 ## Result
 **PASS:** tables below; the default is D-027.
@@ -170,7 +171,84 @@ First S0 jobs: **N = 4 games × K = 32 arenas, `--batch-size 4`, `-c 8` (2 cores
 - **K = 32:** past ~32 arenas, steps per process grow slowly. Also K × episode length must fit `MaxStepNum` (finding 4).
 - **GPU trainer:** the CPU fallback doubles the time per batch.
 
+## Combat build A: `build-10520b5`, S0 (L-007 (2))
+Re-measured on the combat stage, as D-027 asked. S0 decides 15 times per game second (D-023), so a "step" here is one agent decision (4 fixed 60 Hz ticks).
+
+**Commands** (`spikeB.sbatch` now takes `STAGE=S0`; training adds `-StatsCsv` per game; sim mode runs `-Eval` with a huge episode count at a fixed level `@L`, so the ramp can't change the number of bots):
+```bash
+S=~/beanRant/FPS-Agent/cluster/slurm/spikeB.sbatch
+for K in 8 16 32; do
+  sbatch -t 75 -c 40 --gres=gpu:1 --export=ALL,STAGE=S0,BUILD_SHA=10520b5,MODE=train,ARENAS=$K,BATCHES=15,CONFIG_LIMIT=900,CONFIGS="4x4 8x8 16x16" $S
+done
+sbatch -t 30 -c 40 --gres=none --export=ALL,STAGE=S0,BUILD_SHA=10520b5,MODE=sim,SECONDS_EACH=45,\
+RESUME_FROM=<smoke 152030 a_train3/snapshots_final>,CONFIGS="1x8@0 1x16@0 1x32@0 1x64@0 1x32@1 1x64@1 4x32@0 8x32@0 16x32@0 16x32@1" $S
+```
+Level `@0` is 1 static bot per arena; `@1` is 5. The sim policy is the 3-batch smoke snapshot (it mostly times out, like a fresh run). CSVs: [`s0-sim-152035.csv`](B-throughput/s0-sim-152035.csv), [`s0-train-152032-152034.csv`](B-throughput/s0-train-152032-152034.csv).
+
+### Simulation only (job 152035, no trainer)
+| N proc | K arenas | bots | decisions/s total | per process | per arena | game s per wall s | CPU cores per process | RSS MB per process |
+|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1 | 8 | 1 | 2,055 | 2,055 | 257 | 17.1 | 1.42 | 376 |
+| 1 | 16 | 1 | 2,376 | 2,376 | 148 | 9.9 | 1.37 | 396 |
+| 1 | 32 | 1 | 3,050 | 3,050 | 95 | 6.4 | 1.48 | 404 |
+| 1 | 32 | 5 | 2,458 | 2,458 | 77 | 5.1 | 1.39 | 413 |
+| 1 | 64 | 1 | 3,363 | 3,363 | 53 | 3.5 | 1.48 | 430 |
+| 1 | 64 | 5 | 2,663 | 2,663 | 42 | 2.8 | 1.29 | 437 |
+| 4 | 32 | 1 | 12,678 | 3,169 | 99 | 6.6 | 1.50 | 405 |
+| 8 | 32 | 1 | 24,786 | 3,098 | 97 | 6.5 | 1.50 | 404 |
+| 16 | 32 | 1 | 43,642 | 2,728 | 85 | 5.7 | 1.48 | 403 |
+| 16 | 32 | 5 | 34,840 | 2,177 | 68 | 4.5 | 1.39 | 406 |
+
+### Training (jobs 152032–152034, 15 batches per config)
+| K arenas | N games = `--batch-size` | s per batch | `PPO train` s | `Pull Experience` s | `PPO create batches` s | used decisions/s | used / simulated | GPU median / max | GPU memory | trainer cores | game cores (all) |
+|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|---:|---:|
+| 8 | 4 | 18.62 | 11.28 | 5.93 | 0.32 | 2,148 | 0.78 | 12% / 27% | 1.5 GB | 0.67 | 1.9 |
+| 8 | 8 | 20.08 | 11.36 | 6.01 | 0.79 | 3,985 | 0.78 | 11% / 27% | 2.1 GB | 0.72 | 3.2 |
+| 8 | 16 | 23.99 | 11.55 | 6.66 | 2.24 | 6,669 | 0.79 | 4% / 27% | 3.4 GB | 0.76 | 3.8 |
+| 16 | 4 | 18.94 | 11.64 | 6.02 | 0.32 | 2,112 | 0.67 | 12% / 27% | 1.5 GB | 0.65 | 1.8 |
+| 16 | 8 | 20.13 | 11.54 | 6.09 | 0.79 | 3,974 | 0.66 | 11% / 27% | 2.1 GB | 0.71 | 3.5 |
+| 16 | 16 | 24.27 | 11.96 | 6.58 | 2.25 | 6,593 | 0.68 | 4% / 26% | 3.4 GB | 0.77 | 3.9 |
+| 32 | 4 | 19.00 | 11.31 | 6.33 | 0.32 | 2,105 | 0.51 | 12% / 27% | 1.5 GB | 0.64 | 1.9 |
+| 32 | 8 | 20.83 | 11.79 | 6.48 | 0.79 | 3,840 | 0.53 | 11% / 27% | 2.1 GB | 0.70 | 3.1 |
+| 32 | 16 | 24.62 | 11.55 | 7.41 | 2.20 | 6,498 | 0.54 | 3% / 27% | 3.4 GB | 0.74 | 5.1 |
+
+All 84 games exited 0. Every game log stayed small: 6–9 KB per game per batch, 59–129 `Resetting Agents` lines per game over 15 batches. The trainer's `Avg Rew Sum` rose from about −0.5 to −0.2 in every config, at about the same rate per batch for N = 4, 8 and 16; nothing cleared yet (`level` 0.00), as expected after 15 batches.
+
+### Combat findings
+1. **The trainer sets the pace, and a combat update costs 3× a reach-task update.**
+   - `PPO train` takes **11.3–12.0 s per batch whatever N and K are** (Spike A: 2.2 s).
+   - The combat policy has a 128-wide memory state trained over 16-step windows (`PolicyWindow` 16, 1,024 windows per policy minibatch) and attention encoders for the enemy and sound sets (saved trainer config).
+   - The update is overhead-bound, not GPU-bound: the GPU's median use is 3–12% and the trainer process uses 0.64–0.77 cores.
+2. **Seconds per batch grow only with N, through batch-building:** 19 s (N = 4), 20–21 s (N = 8), 24–25 s (N = 16). `PPO create batches` goes 0.32 → 0.79 → 2.2 s, as in Spike A. K hardly matters.
+3. **Experience per second grows almost linearly with N** (about 2,100 / 3,900 / 6,600 used decisions/s), because the fixed `PPO train` dominates. Per batch, `Avg Rew Sum` improved at the same rate for N = 4, 8 and 16 in these 15 batches, matching Spike A: more experience per update didn't learn faster per update.
+4. **While untrained agents all time out together, the replay buffer drops part of every round.**
+   - Each game's buffer holds 10,000 steps (`ReplayMaxSteps`). All K episodes end on the same tick at 20 s (300 decisions).
+   - At K = 32 a round is 9,600 steps, so the buffer fills on the 2nd round. The game pushes every 40 s of game time (checked in the log), and the rest of that round is dropped: **used / simulated = 0.51–0.54** (predicted 10,000 / 19,200 = 0.52).
+   - The same arithmetic gives 0.69 at K = 16 (3 rounds; measured 0.66–0.68) and 0.83 at K = 8 (5 rounds; measured 0.78–0.79).
+   - So `Pull Experience` (about 6 s for every K) is the game time of 2–5 lockstep rounds.
+   - Once agents clear at different times, episodes de-synchronize and the loss shrinks to the episodes that end on the sending tick. The fill time should then fall to 10,000 / (decisions/s per game): about 3.3 s at K = 32 and 4.9 s at K = 8.
+   - No change is needed; S0 training watches it.
+5. **Simulation per process (CPU only):**
+   - 2,055 decisions/s at K = 8 up to 3,363 at K = 64, on about 1.4–1.5 cores and 0.4 GB.
+   - At K = 32, one arena runs at 6.4× real time.
+   - On one node, 16 processes × 32 arenas reach 43,642 decisions/s (−14% per process against 4 processes).
+   - In training, the games are idle most of the time: all games together use 1.8–5.1 cores, because they wait for the trainer.
+6. **The static bots are cheap next to the agent's senses.**
+   - 5 bots instead of 1 cost **19–21%** of decisions/s: 3,050 → 2,458 at K = 32, 3,363 → 2,663 at K = 64, 43,642 → 34,840 for 16 × 32.
+   - That's about 20 µs per extra bot per decision (4 ticks), against about 330 µs per decision for the agent with its 82 traces, the first bot and the engine's per-arena cost (K = 32, level 0).
+7. **No problems with the patched polls (D-029):** no heartbeat or connection errors in 84 game logs. The only side effect is cosmetic: `_worker` tracebacks after `Socket Communicator Exiting...` at the trainer's shutdown ([smoke report](../runs/s0smoke-20261112-152030.md), observation 4).
+
+### Chosen default for combat (D-030)
+**D-027 stands for S0: N = 4 games × K = 32 arenas, `--batch-size 4`, 1 GPU, `-c 8`**, now measured on the combat build:
+- **N = 4:** the fastest updates (19.0 s per batch). N = 8 costs +10% per batch and N = 16 +30%, for more experience per update that didn't learn faster per update here or in Spike A.
+- **K = 32:** the fastest game per process (3,050 decisions/s against 2,055 at K = 8), so the shortest buffer fill once episodes de-synchronize. One lockstep round (32 × 300 = 9,600) also fits `ReplayMaxSteps` (10,000).
+- **`-c 8`:** 4 games use about 2 cores in training and 6 at full speed, plus the trainer's ~0.7.
+- **1 GPU:** it's 88–97% idle. Several trainers per GPU would be the better fit for sweeps (one job, several trainers); it isn't needed for one chain.
+- **Job length:** about 300 batches per 2 h job (19 s × 300 = 95 min, plus the 5 min `USR1` margin).
+- **Revisit** when S0 is learning: N = 4 against N = 8 on learning per wall-clock hour, and the trainer knobs `-Set=Combat.Ppo.IterationsPerGather` / `PolicyBatchSize` (they change PPO, so compare on `-Eval`).
+
 ## Follow-ups
 - Requests added to STATUS.md: **C-007** (trainer and PPO settings for scaling).
 - Spike D (multi-node) is on hold (user, 2026-11-12). Finding 1 says one node already has far more simulation capacity than one trainer can use.
 - Run folders on Cradle: `~/beanRant/runs/spikeB-20261112-{151810,151811,151812,151931,151932}/` (73 MB).
+- Combat rerun: `~/beanRant/runs/spikeB-20261112-{152032,152033,152034,152035}/` on Cradle.

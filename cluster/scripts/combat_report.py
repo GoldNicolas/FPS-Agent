@@ -10,6 +10,7 @@ Log formats: README -> "Game log lines to grep"; CSV columns: Learning/CombatSta
 """
 import csv
 import glob
+import gzip
 import json
 import os
 import re
@@ -69,7 +70,8 @@ def cmd_chainstate(run, level, windows):
 
 def game_log(path):
     keys, stats, evals, resets, warn, err, lines, first_t, last_t = [], [], [], 0, [], [], 0, None, None
-    with open(path, errors="replace") as f:
+    opener = gzip.open if path.endswith(".gz") else open
+    with opener(path, "rt", errors="replace") as f:
         for line in f:
             lines += 1
             p = PREFIX.match(line)
@@ -134,7 +136,7 @@ def cmd_step(d):
     info = read_info(d)
     print(f"\n#### `{os.path.basename(d)}`\n")
     print("- info: " + " ".join(f"{k}={v}" for k, v in info.items() if k not in ("start", "end", "launch", "games_end")))
-    for p in sorted(glob.glob(os.path.join(d, "game*.log"))):
+    for p in sorted(glob.glob(os.path.join(d, "game*.log")) + glob.glob(os.path.join(d, "game*.log.gz"))):
         g = game_log(p)
         print(f"- **{os.path.basename(p)}**: {g['lines']:,} lines, {g['bytes'] / 1e6:.2f} MB, "
               f"`Resetting Agents` x {g['resets']:,}, warnings {len(g['warn'])}, errors {len(g['err'])}, CombatStats x {len(g['stats'])}")
