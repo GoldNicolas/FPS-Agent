@@ -1,12 +1,26 @@
 # Learning Agents trainer (Python), pinned to UE 5.7.4
 
-Verbatim copies from the engine install. **Do not edit**: re-copy them when the engine version changes (owner: LOCAL).
+Verbatim copies from the engine install, except for the one documented patch below. **Do not edit otherwise**: re-copy them when the engine version changes, then re-apply the patch (owner: LOCAL).
 
 | Source (UE 5.7.4, CL 51494982) | Here |
 |---|---|
 | `Engine/Plugins/Experimental/LearningAgents/Content/Python/train.py` | `train.py` |
 | `Engine/Plugins/Experimental/LearningAgents/Content/Python/learning_agents/**/*.py` | `learning_agents/` |
 | `Engine/Plugins/Experimental/NNERuntimeBasicCpu/Content/Python/*.py` | `nne_runtime_basic_cpu/` |
+
+## Local patch: shorter socket polls (D-029, C-007 (1))
+`learning_agents/communicators/socket_communicator.py` polls in three places with a fixed 1-second sleep. They cost 1–2 s of every ~3.9 s training update (Spike B). Every patched line is marked `# FPS-Agent patch (D-029, C-007): was 1 s`.
+
+| Line | Function | Epic 5.7.4 | Here | What it waits for |
+|---|---|---|---|---|
+| 549 | `receive_experience` | `time.sleep(1)` | `time.sleep(0.01)` | enough game buffers for one batch (`--batch-size`) |
+| 665 | `_sender` | `time.sleep(1)` | `time.sleep(0.05)` | the next send round: new networks, or a heartbeat ping (now 20/s per game instead of 1/s) |
+| 684 | `_worker` | `time.sleep(1)` | `time.sleep(0.01)` | a game to finish receiving the new networks |
+
+- **Measured by CLUSTER** in Spike B, job 151931 (`docs/spikes/B-throughput.md`, the diff in `docs/spikes/B-throughput/trainer-poll-patch.diff`): 15–31% fewer seconds per batch, and all 75 games ran normally.
+- The other three `time.sleep(1)` calls (lines 501–517) are left as Epic wrote them.
+- **To undo:** set the three values back to `1`. Nothing else depends on them.
+- **When the engine version changes:** re-copy the files, re-apply these three edits, and re-measure.
 
 ## Python packages the socket PPO path imports
 - `numpy`, `torch`: always.

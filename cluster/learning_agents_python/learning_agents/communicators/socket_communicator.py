@@ -546,7 +546,7 @@ class SocketCommunicator(AbstractCommunicator):
                     buffers.append(buffer)
                     stats.append(stat)
                 if len(buffers) < self.min_batch_size:
-                    time.sleep(1)
+                    time.sleep(0.01)  # FPS-Agent patch (D-029, C-007): was 1 s
                 else:
                     break
 
@@ -662,7 +662,7 @@ class SocketCommunicator(AbstractCommunicator):
         
     def _sender(self):
         while self.sender_active:
-            time.sleep(1)
+            time.sleep(0.05)  # FPS-Agent patch (D-029, C-007): was 1 s
             with self.lock, self._sending_context():
                 for client_socket in self.client_sockets:
                     try:
@@ -681,7 +681,7 @@ class SocketCommunicator(AbstractCommunicator):
         try: 
             while True:
                 if client_socket.ready_to_receive_networks and self._test_connection(client_socket): # do not read socket until client has received new networks
-                    time.sleep(1)
+                    time.sleep(0.01)  # FPS-Agent patch (D-029, C-007): was 1 s
                     continue
                 for replay_buffer_id, replay_buffer in self.replay_buffers_by_id.items():
                     result, buffer, stat, networks_version = socket_receive_experience_reinforcement(

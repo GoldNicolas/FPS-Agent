@@ -59,7 +59,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 - Unreal Engine **5.7** (5.7.4 installed); Linux cross-compile toolchain **v26 (clang 20.1.8, Rocky Linux 8)**.
 - Windows compiler: VS 2022 Build Tools 17.14, MSVC 14.44, Windows SDK 10.0.26100.
 - Cradle: Rocky Linux 8.6 (glibc 2.28), Slurm.
-- Learning Agents Python trainer: copied from *this* engine version into `cluster/learning_agents_python/`. Never mix files from different engine versions.
+- Learning Agents Python trainer: copied from *this* engine version into `cluster/learning_agents_python/`. Never mix files from different engine versions. The only change to Epic's files is the documented socket-poll patch (D-029; listed in that folder's README).
 - The Epic course is for 5.5 and uses Blueprints. When porting, verify class and function names against the 5.7 headers; don't trust the 5.5 names.
 - Python 3.11 everywhere we control (it matches UE 5.7's bundled Python 3.11.8). Conda envs use **conda-forge only**.
 
