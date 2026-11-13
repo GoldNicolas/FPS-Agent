@@ -311,4 +311,34 @@ bool FFPSCombatArenaS1FairnessTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatArenaScriptedS1Test, "FPSAgent.Combat.Arena.ScriptedS1",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatArenaScriptedS1Test::RunTest(const FString& Parameters)
+{
+	FPSTest::FTestWorld W;
+	TStrongObjectPtr<UCombatArena> A(NewObject<UCombatArena>(GetTransientPackage()));
+	A->Build(W.World, 0, FVector::ZeroVector, 7, /*StageIndex=*/1);
+	FPSCurriculum::FCombatEpisode E;
+	E.Map = A->GetBaseSpec();
+	E.AgentYawDeg = 0.f;
+	FPSCurriculum::FBotSpawn Behind;
+	Behind.Offset = FVector2D(-1500.0, 0.0); // behind the agent: out of view
+	Behind.YawDeg = 180.f;
+	E.Bots = { Behind };
+	A->StartEpisode(E, 3, 0.0);
+	A->PrepareDecision(0.1);
+	const FPSCombatObs::FAgentAction Explore = A->ScriptedAction(4.f / 60.f);
+	TestTrue(TEXT("nothing in view: the reference explores (moves or turns)"), !Explore.Move.IsNearlyZero() || FMath::Abs(Explore.Aim.X) > 0.01);
+	TestFalse(TEXT("nothing in view: no fire"), Explore.bFire);
+
+	FPSCurriculum::FCombatEpisode F = E;
+	F.Bots[0].Offset = FVector2D(1000.0, 0.0); // straight ahead
+	A->StartEpisode(F, 4, 0.0);
+	A->PrepareDecision(0.1);
+	const FPSCombatObs::FAgentAction Shoot = A->ScriptedAction(4.f / 60.f);
+	TestTrue(TEXT("enemy in view: stands still to shoot"), Shoot.Move.IsNearlyZero());
+	TestTrue(TEXT("enemy in view: aims at it"), FMath::Abs(Shoot.Aim.X) < 0.05);
+	return true;
+}
+
 #endif

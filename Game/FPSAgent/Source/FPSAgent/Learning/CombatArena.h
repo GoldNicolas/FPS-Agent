@@ -61,7 +61,7 @@ public:
 	/** The action to hold until the next decision (buttons apply now). */
 	void SetAction(const FPSCombatObs::FAgentAction& Action);
 	/** -Scripted reference action for this decision. */
-	FPSCombatObs::FAgentAction ScriptedAction(float DecisionSeconds) const;
+	FPSCombatObs::FAgentAction ScriptedAction(float DecisionSeconds);
 
 	ABeanCharacter* GetAgent() const { return Agent; }
 	AScriptedBot* GetBot(int32 Index) const { return Bots.IsValidIndex(Index) ? Bots[Index].Get() : nullptr; }

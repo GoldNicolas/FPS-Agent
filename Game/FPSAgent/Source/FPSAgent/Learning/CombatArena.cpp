@@ -469,7 +469,7 @@ void UCombatArena::BuildObservation(FPSCombatObs::FObservationData& Out, double 
 	}
 }
 
-FPSCombatObs::FAgentAction UCombatArena::ScriptedAction(float DecisionSeconds) const
+FPSCombatObs::FAgentAction UCombatArena::ScriptedAction(float DecisionSeconds)
 {
 	const UFPSAgentSettings& S = Settings();
 	FPSCombatObs::FScriptedTarget Target;
@@ -494,7 +494,46 @@ FPSCombatObs::FAgentAction UCombatArena::ScriptedAction(float DecisionSeconds) c
 		}
 	}
 	const FRifleFireState& Fire = Agent->GetRifle()->GetFireState();
-	return FPSCombatObs::ScriptedAction(Target, Fire.Ammo, S.Rifle.MagazineSize, Fire.IsReloading(), S.Body.HeadRadius, S.Combat.Perception, DecisionSeconds);
+	FPSCombatObs::FAgentAction A = FPSCombatObs::ScriptedAction(Target, Fire.Ammo, S.Rifle.MagazineSize, Fire.IsReloading(), S.Body.HeadRadius, S.Combat.Perception, DecisionSeconds);
+	if (!StageSpec().bAgentCanMove || Target.bHasTarget)
+	{
+		return A; // S0, or an enemy in sight: stand still, turn to the head, fire on target
+	}
+	// The agent may move and sees nobody: explore like a bot and investigate the newest enemy sound it hears (the same hearing as the policy).
+	const double Now = GetWorld() ? GetWorld()->GetTimeSeconds() : 0.0;
+	const FBotBehaviourSettings& B = S.Bots;
+	const FVector2D Here = ToLocal(Agent->GetActorLocation());
+	const FPSBots::FSoundEvent* Newest = nullptr;
+	for (const FPSBots::FSoundEvent& E : Sounds)
+	{
+		if (E.Source != INDEX_NONE && E.Time > LastScriptedSoundTime && FPSBots::CanHear(E, Agent->GetActorLocation(), Now, B.SoundMemorySeconds, B)
+			&& (!Newest || E.Time > Newest->Time))
+		{
+			Newest = &E;
+		}
+	}
+	if (Newest)
+	{
+		LastScriptedSoundTime = Newest->Time;
+		AgentBrain.Investigate(ToLocal(Newest->Position), Here, Now, B);
+	}
+	const FPSBots::FBotIntent Intent = AgentBrain.Update(Here, Now, B);
+	const float MaxPerDecision = FMath::Max(1e-3f, S.Combat.Perception.MaxTurnRateDegPerSec * DecisionSeconds);
+	const float PitchFix = FMath::Clamp(static_cast<float>(-FRotator::NormalizeAxis(View.Pitch)) / MaxPerDecision, -1.f, 1.f); // level the view
+	if (Intent.MoveDir.IsNearlyZero())
+	{
+		A.Aim = FVector2D(0.5, PitchFix); // standing (paused or looking around): sweep the view
+		return A;
+	}
+	const float MoveYaw = FMath::RadiansToDegrees(FMath::Atan2(Intent.MoveDir.Y, Intent.MoveDir.X));
+	const float YawError = FRotator::NormalizeAxis(MoveYaw - View.Yaw);
+	A.Aim = FVector2D(FMath::Clamp(YawError / MaxPerDecision, -1.f, 1.f), PitchFix);
+	if (FMath::Abs(YawError) < 45.f) // walk once roughly facing the path, so the eyes lead
+	{
+		const FVector Local = FPSPerception::ToViewFrame(FVector(Intent.MoveDir.X, Intent.MoveDir.Y, 0.0), View.Yaw);
+		A.Move = FVector2D(Local.X, Local.Y).GetClampedToMaxSize(1.0);
+	}
+	return A;
 }
 
 void UCombatArena::Sense(TArray<FPSPerception::FSighting>& Out) const
