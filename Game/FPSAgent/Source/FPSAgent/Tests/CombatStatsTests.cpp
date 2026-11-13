@@ -53,4 +53,30 @@ bool FFPSCombatStatsTest::RunTest(const FString& Parameters)
 	return true;
 }
 
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatStatsTopTest, "FPSAgent.Combat.StatsClearTop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatStatsTopTest::RunTest(const FString& Parameters)
+{
+	auto Rec = [](float Level, bool bCleared, bool bReview) { FEpisodeRecord R; R.Level = Level; R.bCleared = bCleared; R.bReview = bReview; return R; };
+	FWindow W;
+	W.TopLevel = 0.95f;
+	W.Add(Rec(1.f, true, false));    // counts, cleared
+	W.Add(Rec(0.96f, false, false)); // counts, not cleared
+	W.Add(Rec(0.5f, true, false));   // below the gate level
+	W.Add(Rec(1.f, true, true));     // review episode: never counts
+	TestEqual(TEXT("gate-level episodes"), W.TopEpisodes, 2);
+	TestEqual(TEXT("gate-level clear rate"), static_cast<float>(W.ClearRateTop()), 0.5f, 1e-6f);
+	TestTrue(TEXT("log line has clearTop"), LogLine(W, 1.0, FLevelSummary(), 1.0).Contains(TEXT("clearTop=50.0%(n=2)")));
+	TArray<FString> Header, Row;
+	CsvHeader().ParseIntoArray(Header, TEXT(","), false);
+	CsvRow(W, 1.0, FLevelSummary(), 1.0).ParseIntoArray(Row, TEXT(","), false);
+	TestEqual(TEXT("csv columns still match"), Row.Num(), Header.Num());
+	TestEqual(TEXT("new columns are last"), Header.Last(), FString(TEXT("episodesTop")));
+	W.TopLevel = 0.9f;
+	W.Reset();
+	TestEqual(TEXT("reset clears the counts"), W.TopEpisodes, 0);
+	TestEqual(TEXT("reset keeps the gate level"), W.TopLevel, 0.9f);
+	return true;
+}
+
 #endif

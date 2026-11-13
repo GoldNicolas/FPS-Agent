@@ -24,9 +24,15 @@ namespace FPSCombatStats
 		Shots += R.Shots;
 		Hits += R.Hits;
 		Headshots += R.Headshots;
+		if (!R.bReview && R.Level >= TopLevel - 1e-4f)
+		{
+			++TopEpisodes;
+			TopClears += R.bCleared ? 1 : 0;
+		}
 	}
 
 	double FWindow::ClearRate() const { return Ratio(Clears, Episodes); }
+	double FWindow::ClearRateTop() const { return Ratio(TopClears, TopEpisodes); }
 	double FWindow::DeathRate() const { return Ratio(Deaths, Episodes); }
 	double FWindow::TimeoutRate() const { return Ratio(Timeouts, Episodes); }
 	double FWindow::AvgReturn() const { return Ratio(ReturnSum, Episodes); }
@@ -39,10 +45,10 @@ namespace FPSCombatStats
 	FString LogLine(const FWindow& W, double GameTime, const FLevelSummary& Level, double DecisionsPerSecond)
 	{
 		FString Line = FString::Printf(
-			TEXT("CombatStats: gameTime=%.0fs episodes=%d clear=%.1f%% died=%.1f%% timeout=%.1f%% avgReturn=%.3f kills/ep=%.2f acc=%.1f%% hs=%.1f%% clearTime=%.1fs level=%.2f(%.2f..%.2f) decisions/s(wall)=%.0f terms:"),
+			TEXT("CombatStats: gameTime=%.0fs episodes=%d clear=%.1f%% died=%.1f%% timeout=%.1f%% avgReturn=%.3f kills/ep=%.2f acc=%.1f%% hs=%.1f%% clearTime=%.1fs level=%.2f(%.2f..%.2f) decisions/s(wall)=%.0f clearTop=%.1f%%(n=%d) terms:"),
 			GameTime, W.Episodes, 100.0 * W.ClearRate(), 100.0 * W.DeathRate(), 100.0 * W.TimeoutRate(), W.AvgReturn(),
 			W.KillsPerEpisode(), 100.0 * W.Accuracy(), 100.0 * W.HeadshotRate(), W.AvgClearSeconds(), Level.Mean, Level.Min, Level.Max,
-			DecisionsPerSecond);
+			DecisionsPerSecond, 100.0 * W.ClearRateTop(), W.TopEpisodes);
 		for (int32 i = 0; i < FPSCombatReward::TermCount; ++i)
 		{
 			Line += FString::Printf(TEXT(" %s=%.3f"), FPSCombatReward::TermName(static_cast<FPSCombatReward::ETerm>(i)), W.AvgTerm(i));
@@ -57,6 +63,7 @@ namespace FPSCombatStats
 		{
 			H += FString::Printf(TEXT(",term_%s"), FPSCombatReward::TermName(static_cast<FPSCombatReward::ETerm>(i)));
 		}
+		H += TEXT(",clearRateTop,episodesTop");
 		return H;
 	}
 
@@ -69,6 +76,7 @@ namespace FPSCombatStats
 		{
 			R += FString::Printf(TEXT(",%.4f"), W.AvgTerm(i));
 		}
+		R += FString::Printf(TEXT(",%.4f,%d"), W.ClearRateTop(), W.TopEpisodes);
 		return R;
 	}
 

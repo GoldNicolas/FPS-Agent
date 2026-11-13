@@ -36,10 +36,15 @@ namespace FPSCombatStats
 		int64 Shots = 0;
 		int64 Hits = 0;
 		int64 Headshots = 0;
+		/** Non-review episodes at a level of at least TopLevel (the promotion trigger's gate-level clear rate, D-031). */
+		int32 TopEpisodes = 0;
+		int32 TopClears = 0;
+		float TopLevel = 0.95f;
 
 		void Add(const FEpisodeRecord& R);
-		void Reset() { *this = FWindow(); }
+		void Reset() { const float Keep = TopLevel; *this = FWindow(); TopLevel = Keep; }
 		double ClearRate() const;
+		double ClearRateTop() const;
 		double DeathRate() const;
 		double TimeoutRate() const;
 		double AvgReturn() const;

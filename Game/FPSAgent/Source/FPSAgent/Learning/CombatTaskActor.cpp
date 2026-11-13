@@ -83,6 +83,9 @@ void ACombatTaskActor::BeginPlay()
 		if (IConsoleVariable* MaxFps = IConsoleManager::Get().FindConsoleVariable(TEXT("t.MaxFPS"))) { MaxFps->Set(0.f); }
 	}
 
+	Window.TopLevel = S.Curriculum.GateLevel;
+	EvalTotals.TopLevel = S.Curriculum.GateLevel;
+
 	const TArray<FVector> Centers = FPSReach::ArenaCenters(Args.Arenas, S.Combat.ArenaSpacingCm, GetActorLocation());
 	for (int32 i = 0; i < Centers.Num(); ++i)
 	{
