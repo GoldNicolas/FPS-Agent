@@ -14,10 +14,11 @@ namespace FPSArena
 	/**
 	 * Pure: MakeOpenFloorSpec plus random cover tiles (S1/S2 floors, spec §6).
 	 * - Count: round(CoverDensity x Tiles^2) cover tiles, at most half the interior.
-	 * - Height: LowFraction of them are low ('l', 120 cm), the rest high ('h', 250 cm).
-	 * - Connectivity: every walkable tile stays in one strongly connected component (FPSNav::FTileGraph).
-	 * - Fallback: it tries up to 8 layouts, then returns the open floor.
-	 * - Deterministic for a given Rng state.
+	 * - Height: the first LowFraction of the placed tiles are low ('l', 120 cm); the rest are high ('h', 250 cm).
+	 * - Placement: cells are tried in one seeded order. A cell that would split the walkable floor is skipped, so every walkable
+	 *   tile stays in one strongly connected component (FPSNav::FTileGraph). It never falls back to an empty floor; at very
+	 *   high densities slightly fewer tiles than requested may fit.
+	 * - Deterministic: the Rng draws (one shuffle) don't depend on which cells are skipped.
 	 */
 	FPSAGENT_API FMapSpec MakeCoverFloorSpec(int32 Tiles, float CoverDensity, float LowFraction, FRandomStream& Rng, const FString& Name);
 }

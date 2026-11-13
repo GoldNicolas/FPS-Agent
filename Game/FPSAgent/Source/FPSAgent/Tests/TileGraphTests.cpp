@@ -125,7 +125,9 @@ bool FFPSCoverFloorTest::RunTest(const FString& Parameters)
 	FRandomStream Z(1);
 	TestTrue(TEXT("density 0 = the open floor"), FPSArena::MakeCoverFloorSpec(20, 0.f, 0.5f, Z, TEXT("o")).Tiles == FPSArena::MakeOpenFloorSpec(20, TEXT("o")).Tiles);
 	FRandomStream Dense(3);
-	TestEqual(TEXT("dense layouts stay connected (or fall back to open)"), FTileGraph::Build(FPSArena::MakeCoverFloorSpec(20, 0.45f, 0.5f, Dense, TEXT("d"))).CountStronglyConnected(), 1);
+	const FMapSpec D = FPSArena::MakeCoverFloorSpec(20, 0.45f, 0.5f, Dense, TEXT("d"));
+	TestEqual(TEXT("dense layouts stay connected"), FTileGraph::Build(D).CountStronglyConnected(), 1);
+	TestTrue(TEXT("dense layouts really place cover (at least 162 of the 180 asked for)"), Count(D, TEXT('l')) + Count(D, TEXT('h')) >= 162);
 	return true;
 }
 
