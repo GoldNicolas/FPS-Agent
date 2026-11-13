@@ -2519,6 +2519,8 @@ void UCombatArena::StartEpisode(const FPSCurriculum::FCombatEpisode& Config, int
 	const UFPSAgentSettings& S = Settings();
 	const FVector Spawn = Center + FVector(Config.AgentOffset.X, Config.AgentOffset.Y, 0.0) + SpawnOffset();
 	const FRotator Facing(0.0, Config.AgentYawDeg, 0.0);
+	Agent->SetDeadState(false);
+	Agent->ApplyCrouchNow(false); // stand up BEFORE the teleport: standing up after it would lift the bean ~30 cm (Task 7 finding)
 	Agent->SetActorLocationAndRotation(Spawn, Facing, false, nullptr, ETeleportType::TeleportPhysics);
 	if (AController* C = Agent->GetController())
 	{
@@ -2531,7 +2533,6 @@ void UCombatArena::StartEpisode(const FPSCurriculum::FCombatEpisode& Config, int
 	Agent->SetWalking(false);
 	Agent->StopJumping();
 	Agent->GetCharacterMovement()->StopMovementImmediately();
-	Agent->ApplyCrouchNow(false); // stand up now: a crouched capsule teleported to standing height would float, then fall
 
 	ActiveBots = 0;
 	for (int32 i = 0; i < Bots.Num(); ++i)
