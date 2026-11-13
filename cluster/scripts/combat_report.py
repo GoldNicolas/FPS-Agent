@@ -3,6 +3,9 @@
 Usage (la-train python; -I keeps the run folder off the import path):
     combat_report.py step <folder>                  markdown summary of one step: game logs, trainer, eval JSON
     combat_report.py level <folder>                 mean over <folder>/stats_*.csv of the last row's levelMean
+    combat_report.py progress <run> [B]             timeline of <run>/stats_*.csv in blocks of B windows (default 30):
+                                                    episodes, clear/death/timeout rates, return, kills/ep, acc, hs,
+                                                    clear time, and the mean level (episode-weighted over games)
     combat_report.py chainstate <run> <L> <W>       "<end_level> <promoted 0|1> <windows>" for a chain's
                                                     <run>/stats_*.csv: promoted = every game's last W windows
                                                     have levelMean >= L (spec section 5: mean L >= 0.9 for 10 windows)
@@ -66,6 +69,31 @@ def cmd_chainstate(run, level, windows):
     n = min(len(r) for _, r in files)
     promoted = n >= windows and all(float(x["levelMean"]) >= level for _, r in files for x in r[-windows:])
     print(f"{end:.3f} {int(promoted)} {n}")
+
+
+def cmd_progress(run, block):
+    files = last_levels(run)
+    if not files:
+        print("no stats_*.csv in", run)
+        return
+    n = min(len(r) for _, r in files)
+    print(f"{len(files)} games, {n} windows each (10 s of game time per window; gameTime restarts in each chained job)\n")
+    print("| windows | episodes | clear % | died % | timeout % | avg return | kills/ep | acc % | hs % | clear s | level mean (min..max) | decisions/s per game |")
+    print("|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|---:|")
+    for a in range(0, n, block):
+        rows = [x for _, r in files for x in r[a:min(a + block, n)]]
+        ep = sum(int(x["episodes"]) for x in rows)
+        w = lambda k: sum(float(x[k]) * int(x["episodes"]) for x in rows) / ep if ep else 0.0
+        clears = sum(float(x["clearRate"]) * int(x["episodes"]) for x in rows)
+        cs = sum(float(x["avgClearSeconds"]) * float(x["clearRate"]) * int(x["episodes"]) for x in rows) / clears if clears else 0.0
+        last = [r[min(a + block, n) - 1] for _, r in files]
+        lm = statistics.fmean(float(x["levelMean"]) for x in last)
+        lo = min(float(x["levelMin"]) for x in last)
+        hi = max(float(x["levelMax"]) for x in last)
+        dps = statistics.fmean(float(x["decisionsPerSecond"]) for x in rows)
+        print(f"| {a + 1}-{min(a + block, n)} | {ep} | {100 * w('clearRate'):.1f} | {100 * w('deathRate'):.1f} | {100 * w('timeoutRate'):.1f} | "
+              f"{w('avgReturn'):.3f} | {w('killsPerEpisode'):.2f} | {100 * w('accuracy'):.1f} | {100 * w('headshotRate'):.1f} | {cs:.1f} | "
+              f"{lm:.2f} ({lo:.2f}..{hi:.2f}) | {dps:,.0f} |")
 
 
 def game_log(path):
@@ -192,6 +220,8 @@ def main(argv):
         cmd_step(os.path.expanduser(argv[1]))
     elif len(argv) == 2 and argv[0] == "level":
         cmd_level(os.path.expanduser(argv[1]))
+    elif len(argv) in (2, 3) and argv[0] == "progress":
+        cmd_progress(os.path.expanduser(argv[1]), int(argv[2]) if len(argv) == 3 else 30)
     elif len(argv) == 4 and argv[0] == "chainstate":
         cmd_chainstate(os.path.expanduser(argv[1]), float(argv[2]), int(argv[3]))
     else:
