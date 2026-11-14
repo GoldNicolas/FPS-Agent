@@ -422,6 +422,28 @@ struct FCurriculumSettings
 	const FCombatStageSpec& Stage(int32 Index) const { return Index == 1 ? S1 : S0; }
 };
 
+/**
+ * The agent abilities a policy may use (D-033). These are the switches of a mobility line, the same in every stage, applied on top
+ * of the stage's bAgentCanMove. Off = the policy's output for that action is ignored, as S0 ignores movement; the network layout
+ * doesn't change. Design switches, not mechanics (no external source). The `walk` line (the game's) turns both off.
+ */
+USTRUCT(BlueprintType)
+struct FCombatAbilitySettings
+{
+	GENERATED_BODY()
+	UPROPERTY(EditAnywhere, Category="Abilities") bool bCrouch = true;
+	UPROPERTY(EditAnywhere, Category="Abilities") bool bJump = true;
+};
+
+/** Mobility tag for run IDs and logs (D-033): static = no movement (default S0), walk = move + walk only, full = crouch and jump too. */
+inline const TCHAR* MobilityTag(bool bCanMove, const FCombatAbilitySettings& A)
+{
+	if (!bCanMove) { return TEXT("static"); }
+	if (A.bCrouch && A.bJump) { return TEXT("full"); }
+	if (!A.bCrouch && !A.bJump) { return TEXT("walk"); }
+	return A.bCrouch ? TEXT("walk+crouch") : TEXT("walk+jump");
+}
+
 /** Combat stages (S0-S3): rewards, trainer, perception, arena spacing. */
 USTRUCT(BlueprintType)
 struct FCombatSettings
@@ -430,6 +452,8 @@ struct FCombatSettings
 	UPROPERTY(EditAnywhere, Category="Combat") FCombatRewardSettings Reward;
 	UPROPERTY(EditAnywhere, Category="Combat") FCombatPpoSettings Ppo;
 	UPROPERTY(EditAnywhere, Category="Combat") FCombatPerceptionSettings Perception;
+	/** Mobility line switches (D-033), e.g. -Set="Combat.Abilities.bCrouch=false;Combat.Abilities.bJump=false" for the `walk` line. */
+	UPROPERTY(EditAnywhere, Category="Combat") FCombatAbilitySettings Abilities;
 	/** Distance between arena centres: more than the largest arena plus 50 m (spec §5). Arenas never interact anyway. */
 	UPROPERTY(EditAnywhere, Category="Combat") float ArenaSpacingCm = 15000.f;
 };

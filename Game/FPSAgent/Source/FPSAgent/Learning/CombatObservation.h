@@ -83,6 +83,8 @@ namespace FPSCombatObs
 	};
 	/** Policy samples can leave [-1, 1]: non-finite components become 0, then Aim is clamped per axis and Move to length 1. */
 	FPSAGENT_API FAgentAction Sanitize(const FAgentAction& A);
+	/** D-033 mobility line: clears Crouch / Jump when the run's Combat.Abilities switch is off, so that output is ignored (as S0 ignores movement). */
+	FPSAGENT_API FAgentAction ApplyAbilities(const FAgentAction& A, const FCombatAbilitySettings& Abilities);
 	/** Aim change per tick in degrees (yaw, pitch): Aim * MaxTurnRate * TickSeconds (spread evenly, never snapped). */
 	FPSAGENT_API FVector2D AimPerTickDeg(const FVector2D& Aim, const FCombatPerceptionSettings& P, float TickSeconds);
 	/** View-frame move input (forward, right) to a world direction (Z = 0). */

@@ -341,7 +341,7 @@ This is also better for RL. Randomized original layouts keep the agent from memo
 
 ### Actions
 - Movement on 2 continuous axes (forward/back, left/right)
-- Walk, crouch, jump (on/off)
+- Walk, crouch, jump (on/off). Crouch and jump can be switched off per run with `-Set="Combat.Abilities.bCrouch=false;Combat.Abilities.bJump=false"` (D-033). Their outputs are then ignored, and the network stays the same. That is the **`walk`** line, the game's line; the default is the **`full`** line. Run IDs carry the tag, and the `Combat: ready` line and the eval JSON report it as `mobility=`.
 - Aim: change in yaw and pitch, **capped by a maximum turn-rate setting**
 - Fire, reload (on/off)
 - The agent decides **15 times per second** (every 4th fixed 60 Hz tick, D-023), with the aim change spread over those ticks and capped by the turn-rate setting (720°/s).

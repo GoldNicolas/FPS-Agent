@@ -82,13 +82,14 @@ namespace FPSCombatStats
 		return R;
 	}
 
-	FString EvalJson(const FWindow& W, const FString& Stage, float Level, int32 Seed, const FString& Snapshots, float PromotionClearRate)
+	FString EvalJson(const FWindow& W, const FString& Stage, float Level, int32 Seed, const FString& Snapshots, float PromotionClearRate, const FString& Mobility)
 	{
 		const TSharedRef<FJsonObject> Obj = MakeShared<FJsonObject>();
 		Obj->SetStringField(TEXT("stage"), Stage);
 		Obj->SetNumberField(TEXT("level"), Level);
 		Obj->SetNumberField(TEXT("seed"), Seed);
 		Obj->SetStringField(TEXT("snapshots"), Snapshots);
+		if (!Mobility.IsEmpty()) { Obj->SetStringField(TEXT("mobility"), Mobility); } // D-033 mobility line
 		Obj->SetNumberField(TEXT("episodes"), W.Episodes);
 		Obj->SetNumberField(TEXT("clearRate"), W.ClearRate());
 		Obj->SetNumberField(TEXT("deathRate"), W.DeathRate());

@@ -350,7 +350,7 @@ void UCombatArena::EmitFootsteps(double Now)
 
 void UCombatArena::SetAction(const FPSCombatObs::FAgentAction& Action)
 {
-	Held = FPSCombatObs::Sanitize(Action);
+	Held = FPSCombatObs::ApplyAbilities(FPSCombatObs::Sanitize(Action), Settings().Combat.Abilities); // D-033: a masked crouch/jump never reaches the bean
 	if (!Agent || IsAgentDead())
 	{
 		return;

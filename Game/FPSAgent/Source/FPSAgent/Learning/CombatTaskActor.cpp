@@ -173,10 +173,10 @@ void ACombatTaskActor::BeginPlay()
 	NextDecisionTime = Now();
 	NextStatsTime = Now() + S.Combat.Ppo.StatsLogIntervalSeconds;
 	WindowWallStart = FPlatformTime::Seconds();
-	UE_LOG(LogFPSAgent, Display, TEXT("Combat: ready. stage=S%d arenas=%d mode=%s resume=%s startDifficulty=%.2f decisionsPerSecond=%.1f timeLimit=%.0fs bots=%d..%d agentMoves=%d"),
+	UE_LOG(LogFPSAgent, Display, TEXT("Combat: ready. stage=S%d arenas=%d mode=%s resume=%s startDifficulty=%.2f decisionsPerSecond=%.1f timeLimit=%.0fs bots=%d..%d agentMoves=%d mobility=%s"),
 		StageIndex, Arenas.Num(), bScripted ? TEXT("scripted (no policy)") : bEval ? TEXT("eval") : bInfer ? TEXT("infer") : TEXT("train (external trainer)"),
 		Args.ResumeFrom.IsEmpty() ? TEXT("(none)") : *Args.ResumeFrom, Args.StartDifficulty, 1.0 / DecisionSeconds,
-		Stage.TimeLimitSeconds, Stage.BotsEasy, Stage.BotsHard, Stage.bAgentCanMove ? 1 : 0);
+		Stage.TimeLimitSeconds, Stage.BotsEasy, Stage.BotsHard, Stage.bAgentCanMove ? 1 : 0, MobilityTag(Stage.bAgentCanMove, S.Combat.Abilities));
 }
 
 UCombatArena* ACombatTaskActor::ArenaOf(int32 AgentId) const
@@ -417,7 +417,8 @@ void ACombatTaskActor::FinishEval()
 	const FFPSRunArgs& Args = FFPSRunArgs::Get();
 	const float Gate = UFPSAgentSettings::Get().Curriculum.Stage(StageIndex).PromotionClearRate;
 	const FString Json = FPSCombatStats::EvalJson(EvalTotals, FString::Printf(TEXT("S%d"), StageIndex), Args.StartDifficulty, Args.Seed,
-		bScripted ? FString(TEXT("(scripted)")) : Args.ResumeFrom, Gate);
+		bScripted ? FString(TEXT("(scripted)")) : Args.ResumeFrom, Gate,
+		MobilityTag(UFPSAgentSettings::Get().Curriculum.Stage(StageIndex).bAgentCanMove, UFPSAgentSettings::Get().Combat.Abilities));
 	UE_LOG(LogFPSAgent, Display, TEXT("CombatEval: %s"), *Json);
 	if (!Args.EvalJson.IsEmpty())
 	{

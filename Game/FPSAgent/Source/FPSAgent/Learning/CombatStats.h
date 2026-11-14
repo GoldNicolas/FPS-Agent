@@ -73,5 +73,5 @@ namespace FPSCombatStats
 	FPSAGENT_API FString LogLine(const FWindow& W, double GameTime, const FLevelSummary& Level, double DecisionsPerSecond);
 	FPSAGENT_API FString CsvHeader();
 	FPSAGENT_API FString CsvRow(const FWindow& W, double GameTime, const FLevelSummary& Level, double DecisionsPerSecond);
-	FPSAGENT_API FString EvalJson(const FWindow& W, const FString& Stage, float Level, int32 Seed, const FString& Snapshots, float PromotionClearRate);
+	FPSAGENT_API FString EvalJson(const FWindow& W, const FString& Stage, float Level, int32 Seed, const FString& Snapshots, float PromotionClearRate, const FString& Mobility = FString());
 }

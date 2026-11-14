@@ -79,6 +79,14 @@ namespace FPSCombatObs
 		return C;
 	}
 
+	FAgentAction ApplyAbilities(const FAgentAction& A, const FCombatAbilitySettings& Abilities)
+	{
+		FAgentAction C = A;
+		C.bCrouch = A.bCrouch && Abilities.bCrouch;
+		C.bJump = A.bJump && Abilities.bJump;
+		return C;
+	}
+
 	FVector2D AimPerTickDeg(const FVector2D& Aim, const FCombatPerceptionSettings& P, float TickSeconds)
 	{
 		return Aim * (P.MaxTurnRateDegPerSec * TickSeconds);
