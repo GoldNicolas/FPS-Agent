@@ -1,5 +1,9 @@
 # FPS-Agent Constraints: what a game must provide to host the trained combat agent
 
+> **Purpose of this copy (read first).** This is the **v1 hand-off reference**, kept in FPS-Agent only as a record of what was given to the game project. The game maintains its own corrected copy (v1.1, with a stage capability matrix) at `C:/Users/ng440/Desktop/Game/FPS-Agent-Constraints.md`, and **that copy is the one in use**.
+>
+> Don't use this file for game work. Revisit it only if FPS-Agent changes the observation/action layout, the mechanics, the senses or the decision timing. In that case, write a new version and tell the user to hand it to the game project.
+
 **Contract version 1.** Written 2026-11-13 from FPS-Agent commit `b802737` (Linux build `build-0eef702`). It is valid for every snapshot trained with observation/action layout v1. That layout has been frozen since build A (decisions D-023, D-028) and is shared by all curriculum stages S0–S3.
 
 **Who reads this.** An AI coding agent building a full Unreal Engine game into which the FPS-Agent policy will be dropped as enemy bots. FPS-Agent is a separate, private ML project. The game must adapt to the agent; the agent will not adapt to the game.

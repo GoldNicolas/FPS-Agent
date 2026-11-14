@@ -76,7 +76,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 - Keep the RL layer (`Learning/`) behind a thin interface over the gameplay code, so the trainer stack could be swapped (e.g. to AMD Schola) without touching gameplay.
 - Reward terms and weights live in one config struct, and each term is logged separately (to TensorBoard or MLflow) so sweeps can be compared.
 - Accuracy and headshot % are **metrics, not rewards**.
-- `docs/FPS-Agent-Constraints.md` is the contract a future game must meet to host the trained agent. Any change to observations, actions, mechanics values, perception or hearing rules, or decision timing must update it in the same commit, and bump its contract version when the observation/action layout changes.
+- `docs/FPS-Agent-Constraints.md` is only the v1 hand-off reference; the game project keeps the maintained copy. Touch it only when a change alters observations, actions, mechanics values, perception or hearing rules, or decision timing. Then write a new contract version and tell the user to give it to the game project.
 
 ### Unreal-MCP (editor-only)
 - Setup: plugin 0.30.0, **local mode** with no cloud account (`Game/FPSAgent/.env`). The `unreal-mcp` server is in the repo-root `.mcp.json` (`http://localhost:24268/mcp/p/d2699ae8`). It is only reachable while the editor is open; check with `unreal-mcp-cli status -p Game/FPSAgent`.
