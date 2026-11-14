@@ -40,6 +40,7 @@ _Last updated: 2026-11-13 by LOCAL_
     - Local checks: [`builds.md`](builds.md). A top-down clip of the `-Scripted` S1 reference shows the bots walking (local only).
     - **Next for CLUSTER: L-009.**
   - **2026-11-13: S1 promoted** (run `S1-20261113-L009`, release `run-S1-20261113-L009`). Gate 76% vs the scripted reference's 85%; clears are slower (17.6 s vs 9.7 s), with 30% accuracy and 14% headshots. L-008 dropped; the trigger window is now 100 (D-032, request L-010).
+  - **2026-11-13: D-033 mobility lines (in progress).** A small build adds the `Combat.Abilities.bCrouch` and `bJump` switches. The `walk` line (move, walk, shoot) is the game's line; `full` stays for tests. Training continues on `walk`, fine-tuned from S1. Run IDs carry the mobility tag. Request follows with the build.
   - **2026-11-12: C-007 (1) done.** With the user's OK, the pinned trainer carries CLUSTER's socket-poll patch (D-029; 15–31% faster per batch in Spike B). It's trainer-side only, so a `git pull` is enough and the game build doesn't change.
 - **CLUSTER:**
   - L-001 recon **done** ([`cradle.md`](cradle.md)): `gpuq` (A100 80GB PCIe, driver 550.54.14 / CUDA 12.4, no time limit).

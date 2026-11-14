@@ -42,6 +42,8 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 | Trained snapshots for LOCAL to watch or evaluate | GitHub Release `run-<run-id>` (see `docs/runs/README.md`) |
 | Full snapshots, logs, TensorBoard events | Stay on Cradle (`~/beanRant/runs/`, D-021). Never committed. |
 
+**Run IDs (D-033):** `<stage>-<mobility>-<YYYYMMDD>-<jobid>`, with mobility `static`, `walk` or `full`. It MUST match the run's `-Set`: `walk` = `Combat.Abilities.bCrouch=false;Combat.Abilities.bJump=false`, and `full` = neither. Check it against the `mobility=` field of the `Combat: ready` log line. The release is `run-<run-id>`. The `walk` line is the game's line.
+
 ## Hard rules (do not break without the user's explicit OK)
 1. **No computer vision.** Never add camera, render-target or pixel observations. Agents perceive the world through ray casts and line-of-sight checks only.
 2. **Everything must work under `-nullrhi -nosound`.** Training gameplay code must not depend on rendering:
