@@ -121,6 +121,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 - The trainer port is derived from the job ID (`40000 + SLURM_JOB_ID % 20000`). Never hard-code ports.
 - Jobs must survive time limits: save snapshots periodically, stop cleanly on `--signal=B:USR1@300`, and resume by chaining jobs (`--dependency=afterany`).
 - It is a small, shared cluster (12 nodes). Don't hold GPUs or whole nodes idle; size jobs from the Spike B measurements.
+- **Run IDs carry the mobility tag** (D-033, above): set `MOBILITY=walk|full|static` in `combat.sbatch`, never the abilities `-Set` by hand, so the tag, the `-Set` and the logged `mobility=` agree.
 - **Report every run** in `docs/runs/<run-id>.md` and in the STATUS.md Runs table. Publish snapshots LOCAL should look at as Release `run-<run-id>`. Never commit snapshots, logs or TensorBoard files.
 - Never commit secrets (the `gh` token, `.env`). Shell and sbatch scripts must keep LF line endings (enforced by `.gitattributes`).
 

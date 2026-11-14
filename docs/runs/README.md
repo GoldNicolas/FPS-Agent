@@ -2,7 +2,8 @@
 
 **Owner: CLUSTER side.** One file per training or evaluation run: `docs/runs/<run-id>.md`.
 
-- **Run ID:** `<stage>-<YYYYMMDD>-<slurm-job-id>` (e.g. `S0-20261120-48213`). Sweeps: `<stage>-<sweep>-<arrayjob>_<index>`.
+- **Run ID (D-033):** `<stage>-<mobility>-<YYYYMMDD>-<slurm-job-id>` (e.g. `S1-walk-20261114-48213`), mobility `static`, `walk` or `full`. It MUST match the run's `-Set` and the `mobility=` field of every game's `Combat: ready` line. `combat.sbatch` does both from `MOBILITY=walk|full|static` and fails a step on a mismatch. Sweeps: `<stage>-<mobility>-<sweep>-<arrayjob>_<index>`.
+  - Older runs keep their IDs: `S0-…` = static, `S1-20261113-L009` = full.
 - **Stays on Cradle, in `~/beanRant/runs/<run-id>/` (D-021):** full snapshots, logs, TensorBoard event files.
 - **Goes in git:** this report plus small CSV metric summaries (< 1 MB) in `docs/runs/<run-id>/`.
 - **Goes to GitHub Releases:** snapshots the LOCAL side should watch or evaluate, tagged `run-<run-id>`:

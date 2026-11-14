@@ -2,6 +2,10 @@
 # Combat stages S0/S1 on Cradle (requests L-007, L-009; README -> "Game command-line arguments", "Game log lines to grep",
 # "Game exit codes"). Paths per D-021 (docs/cradle.md -> "Our paths"): everything under ~/beanRant.
 # STAGE=S0|S1 (default S0) picks the combat stage for every mode; BUILD_SHA picks the build (S1 needs 0eef702+).
+# MOBILITY=walk|full|static (D-033, default full) sets the run-ID tag and, for walk, prepends
+#   -Set=Combat.Abilities.bCrouch=false;Combat.Abilities.bJump=false to every game process (train, chain, eval,
+#   smoke). Every game log's `Combat: ready ... mobility=` must match; a mismatch fails the step. Run IDs:
+#   <stage>-<mobility>-<YYYYMMDD>-<jobid> (docs/runs/README.md). Use static for S0 (the agent can't move).
 #   MODE=smoke  L-007 (1) / L-009 (1), all in one job: train 3 batches; resume those snapshots for 2 batches; resume
 #               them with -Eval -EvalEpisodes=20; then check that -Stage=S2 and a bad -Set exit with code 2.
 #               Optional: SMOKE_LOAD_SNAP=<dir> (a snapshot of the same network, e.g. the promoted S0 one) must load
@@ -12,7 +16,7 @@
 #               in $RUN/job_<jobid>/, the games append to $RUN/stats_<i>.csv, and the job adds one line to
 #               $RUN/chain.txt (snapshots, last mean level=, promotion trigger). Without RESUME_FROM /
 #               START_DIFFICULTY a job continues from the last chain.txt line. After the promotion trigger
-#               (mean level >= PROMOTE_LEVEL over the last PROMOTE_WINDOWS windows of all games, and the pooled
+#               (mean level >= PROMOTE_LEVEL over the last PROMOTE_WINDOWS (100, L-010) windows of all games, and the pooled
 #               clearTop over the same windows >= PROMOTE_CLEARTOP with >= PROMOTE_MIN_TOP gate-level episodes;
 #               D-031 (6), (11)) or a failed job, later jobs of the chain exit at once. Start a new RUN_ID per run:
 #               build-A CSVs have no clearTop columns and never promote.
@@ -43,7 +47,8 @@ set -uo pipefail
 
 MODE=${MODE:-smoke}
 STAGE=${STAGE:-S0}                # combat stage for train, smoke and eval
-BUILD_SHA=${BUILD_SHA:-0eef702}   # build B (S0 unchanged + S1); L-008 pins 10520b5
+MOBILITY=${MOBILITY:-full}        # walk | full | static (D-033)
+BUILD_SHA=${BUILD_SHA:-25a7900}   # D-033 mobility switches; S0/S1 as in 0eef702
 NUM_GAMES=${NUM_GAMES:-2}
 ARENAS=${ARENAS:-16}
 BATCH_SIZE=${BATCH_SIZE:-$NUM_GAMES}
@@ -56,7 +61,7 @@ SEED=${SEED:-1000}                # eval seed; the episode seeds depend on -Seed
 SCRIPTED=${SCRIPTED:-0}
 EVAL_LIMIT=${EVAL_LIMIT:-1800}    # eval: stop the game after this many seconds
 PROMOTE_LEVEL=${PROMOTE_LEVEL:-0.9}
-PROMOTE_WINDOWS=${PROMOTE_WINDOWS:-10}
+PROMOTE_WINDOWS=${PROMOTE_WINDOWS:-100}   # L-010 / D-032 (2)
 PROMOTE_CLEARTOP=${PROMOTE_CLEARTOP:-0.70}
 PROMOTE_MIN_TOP=${PROMOTE_MIN_TOP:-50}   # fewer gate-level episodes than this: don't call it
 SMOKE_LOAD_SNAP=${SMOKE_LOAD_SNAP:-}
@@ -69,10 +74,16 @@ CONNECT_TIMEOUT=${CONNECT_TIMEOUT:-120}
 BEAN=$HOME/beanRant
 REPO=$BEAN/FPS-Agent
 BUILD=$BEAN/builds/$BUILD_SHA/Linux
-case $MODE in
-  train) RUN_ID=${RUN_ID:-$STAGE-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;   # docs/runs/README.md convention
-  eval)  RUN_ID=${RUN_ID:-${STAGE,,}eval-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
-  *)     RUN_ID=${RUN_ID:-${STAGE,,}$MODE-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
+case $MOBILITY in
+  walk) MOBSET="Combat.Abilities.bCrouch=false;Combat.Abilities.bJump=false" ;;
+  full|static) MOBSET= ;;
+  *) echo "unknown MOBILITY=$MOBILITY (walk|full|static)"; exit 2 ;;
+esac
+[ -n "$MOBSET" ] && SET="$MOBSET${SET:+;$SET}"
+case $MODE in   # docs/runs/README.md: <stage>-<mobility>-<YYYYMMDD>-<jobid>
+  train) RUN_ID=${RUN_ID:-$STAGE-$MOBILITY-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
+  eval)  RUN_ID=${RUN_ID:-${STAGE,,}eval-$MOBILITY-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
+  *)     RUN_ID=${RUN_ID:-${STAGE,,}$MODE-$MOBILITY-$(date +%Y%m%d)-$SLURM_JOB_ID} ;;
 esac
 RUN=$BEAN/runs/$RUN_ID
 GAME_HOME=$RUN/home               # the engine writes its user files here, not in ~ (D-021)
@@ -88,7 +99,7 @@ PORT0=$((40000 + SLURM_JOB_ID % 20000))
 
 T0=$(date +%s)
 {
-  echo "run_id=$RUN_ID mode=$MODE stage=$STAGE partition=${SLURM_JOB_PARTITION:-?} job=$SLURM_JOB_ID host=$(hostname) start=$(date -Is)"
+  echo "run_id=$RUN_ID mode=$MODE stage=$STAGE mobility=$MOBILITY partition=${SLURM_JOB_PARTITION:-?} job=$SLURM_JOB_ID host=$(hostname) start=$(date -Is)"
   echo "build=$BUILD_SHA repo_commit=$(git -C "$REPO" rev-parse --short HEAD) games=$NUM_GAMES arenas=$ARENAS batch_size=$BATCH_SIZE"
   echo "batches=$BATCHES resume_from=${RESUME_FROM:-auto} start_difficulty=${START_DIFFICULTY:-auto} set=${SET:-none}"
   echo "eval_episodes=$EVAL_EPISODES seed=$SEED scripted=$SCRIPTED cpus=${SLURM_CPUS_PER_TASK:-?} cuda_visible_devices=${CUDA_VISIBLE_DEVICES:-none}"
@@ -102,7 +113,7 @@ LOGARG=(); [ -n "$LOGCMDS" ] && LOGARG=(-LogCmds="$LOGCMDS")
 
 # Stop handling: USR1 (5 min before the time limit) or TERM (scancel) asks the current games to quit
 # (the engine shuts down cleanly on SIGTERM); the step then finishes normally and keeps its snapshots.
-STOPPED=0; CUR=
+STOPPED=0; CUR=; MOB_BAD=0
 on_stop() { echo "$(date -Is) got a stop signal: stopping the games in ${CUR:-?}"; STOPPED=1; [ -n "$CUR" ] && pkill -TERM -f -- "-abslog=$CUR/"; }
 trap on_stop USR1 TERM
 trap '[ -n "$CUR" ] && pkill -f -- "$CUR/" 2>/dev/null' EXIT   # leftovers of the current step only
@@ -111,6 +122,18 @@ wait_pid() {  # wait for one child, resuming the wait after a trapped signal; re
   local rc
   while :; do wait "$1"; rc=$?; { [ $rc -gt 128 ] && kill -0 "$1" 2>/dev/null; } || break; done
   return $rc
+}
+
+# D-033: every game that got as far as `Combat: ready` must report the expected mobility. Returns 1 on a mismatch.
+check_mobility() {
+  local tags bad
+  tags=$(cat "$1"/game*.log 2>/dev/null | grep "Combat: ready" | grep -o "mobility=[a-z]*" | sort | uniq -c | tr -s ' ' | tr '\n' ';')
+  [ -z "$tags" ] && return 0
+  bad=$(cat "$1"/game*.log | grep "Combat: ready" | grep -o "mobility=[a-z]*" | grep -v -x "mobility=$MOBILITY" | head -1)
+  if [ -n "$bad" ]; then
+    echo "MOBILITY MISMATCH in $(basename "$1"): expected mobility=$MOBILITY, logs say:$tags" | tee -a "$1/info.txt"; return 1
+  fi
+  echo "mobility check $(basename "$1"):$tags" | tee -a "$1/info.txt"; return 0
 }
 
 # One game, no trainer, under a time limit. timeout runs in its own process group; FPSAgent.sh doesn't exec the
@@ -125,6 +148,7 @@ single() {  # $1 folder, $2 seconds, rest: game args. Sets RC.
   for _ in $(seq 1 60); do pgrep -g "$TPID" > /dev/null || break; sleep 1; done
   pgrep -g "$TPID" > /dev/null && echo "engine still running 60 s after it ended"
   echo "end=$(date +%s.%N) exit=$RC" >> "$D/info.txt"
+  check_mobility "$D" || MOB_BAD=1
 }
 
 # Trainer + NUM_GAMES games for $2 batches. $1 folder, $3 resume dir ('' = fresh), $4 start difficulty,
@@ -171,6 +195,7 @@ train_step() {
   local S
   S=$(ls -d "$D"/trainer/FPSAgent*/Snapshots 2>/dev/null | head -1)
   if [ -n "$S" ] && [ -f "$S/policy.bin" ]; then cp -a "$S" "$D/snapshots_final"; SNAP=$D/snapshots_final; fi
+  check_mobility "$D" || MOB_BAD=1
   echo "step $(basename "$D"): games ${GAME_RCS[*]}, trainer $TRAINER_RC, $(grep -c 'Iter:' "$D/trainer.log") batches, snapshots ${SNAP:-none}, at $(( $(date +%s) - T0 )) s"
   return 0
 }
@@ -186,13 +211,13 @@ smoke)
   [ "$STOPPED" = 0 ] && train_step "$RUN/b_resume2" 2 "$A_SNAP" "$A_LEVEL" $((PORT0 + 1)) "$RUN/b_resume2/stats"
   # (c) resume with -Eval, 20 episodes (no trainer)
   [ "$STOPPED" = 0 ] && single "$RUN/c_eval20" 600 -Stage="$STAGE" -Arenas="$ARENAS" -Seed="$SEED" -Eval -EvalEpisodes=20 \
-    -ResumeFrom="$A_SNAP" -StartDifficulty="$A_LEVEL" -EvalJson="$RUN/c_eval20/eval.json"
+    -ResumeFrom="$A_SNAP" -StartDifficulty="$A_LEVEL" "${SETARG[@]}" -EvalJson="$RUN/c_eval20/eval.json"
   # (d) bad arguments must exit with code 2 (a game that tried the trainer instead would exit 1)
   [ "$STOPPED" = 0 ] && single "$RUN/d_stage_s2" 180 -Stage=S2 -Arenas=2 -Seed=1 $(TRAINER_ARGS $((PORT0 + 2)))
   [ "$STOPPED" = 0 ] && single "$RUN/e_bad_set" 180 -Stage="$STAGE" -Arenas=2 -Seed=1 -Set=Combat.Reward.Nope=1 $(TRAINER_ARGS $((PORT0 + 3)))
   # (f) a snapshot of the same network loads into this stage; (g) another network exits with code 2
   [ "$STOPPED" = 0 ] && [ -n "$SMOKE_LOAD_SNAP" ] && single "$RUN/f_load_snap" 600 -Stage="$STAGE" -Arenas="$ARENAS" -Seed="$SEED" \
-    -Eval -EvalEpisodes=20 -ResumeFrom="$SMOKE_LOAD_SNAP" -EvalJson="$RUN/f_load_snap/eval.json"
+    -Eval -EvalEpisodes=20 -ResumeFrom="$SMOKE_LOAD_SNAP" "${SETARG[@]}" -EvalJson="$RUN/f_load_snap/eval.json"
   [ "$STOPPED" = 0 ] && [ -n "$SMOKE_OTHER_SNAP" ] && single "$RUN/g_other_net" 180 -Stage="$STAGE" -Arenas=2 -Seed=1 \
     -Eval -EvalEpisodes=2 -ResumeFrom="$SMOKE_OTHER_SNAP"
   for D in a_train3 b_resume2 c_eval20 d_stage_s2 e_bad_set f_load_snap g_other_net; do [ -d "$RUN/$D" ] && "${REPORT[@]}" step "$RUN/$D"; done | tee "$RUN/summary.md"
@@ -211,6 +236,7 @@ train)
   train_step "$JOB" "$BATCHES" "$RESUME_FROM" "$START_DIFFICULTY" "$PORT0" "$RUN/stats" || exit 1
   OK=1
   [ -n "$SNAP" ] || OK=0
+  [ "$MOB_BAD" = 1 ] && OK=0
   [ "$STOPPED" = 1 ] || for rc in "${GAME_RCS[@]}"; do [ "$rc" = 0 ] || OK=0; done
   read -r END_LEVEL PROMOTED WINDOWS CLEARTOP TOPN <<< "$("${REPORT[@]}" chainstate "$RUN" "$PROMOTE_LEVEL" "$PROMOTE_WINDOWS" "$PROMOTE_CLEARTOP" "$PROMOTE_MIN_TOP")"
   echo "job=$SLURM_JOB_ID ok=$OK batches=$BATCHES iters=$(grep -c 'Iter:' "$JOB/trainer.log") start_difficulty=$START_DIFFICULTY end_level=$END_LEVEL promoted=$PROMOTED windows=$WINDOWS cleartop=$CLEARTOP top_n=$TOPN stopped=$STOPPED games=$(IFS=,; echo "${GAME_RCS[*]}") snapshots=${SNAP:-none} resume_from=${RESUME_FROM:-none} end=$(date -Is)" \
