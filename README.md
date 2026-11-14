@@ -373,7 +373,7 @@ Every weight lives in config, so sweeps can tune them.
 | **S3 Full-map hunt** | Random map variants, random spawns, several bots including Hunters | Searching for and finding enemies, angles, fighting while moving |
 
 Each stage is a new training run that starts from the previous stage's best snapshot. Promotion has two steps:
-- **Trigger:** the mean ramp level stays ≥ 0.9 **and** the gate-level clear rate `clearTop` stays ≥ the gate (70%) over the last 10 stats windows (D-031). `clearTop` is the clear rate of non-review episodes played at level ≥ 0.95.
+- **Trigger:** the mean ramp level stays ≥ 0.9 **and** the gate-level clear rate `clearTop` stays ≥ the gate (70%) over the last **100** stats windows (D-031, D-032). `clearTop` is the clear rate of non-review episodes played at level ≥ 0.95.
 - **Gate:** `-Eval` at level 1 on a fixed set of evaluation seeds; pass when the clear rate is ≥ 70%.
 
 ### Learning Agents classes (C++)

@@ -209,7 +209,7 @@ The same layout is used in every stage. Everything is in the agent's view frame 
 - **Logging:** the mean, min and max L across arenas, in every stats line and the CSV.
 
 **Promotion**
-- **Trigger:** the mean L stays ≥ 0.9 **and** the gate-level clear rate `clearTop` (non-review episodes at L ≥ 0.95) stays ≥ the gate, over the last 10 stats windows (D-031, build B; `clearTop` is pooled over those windows and all games). The run report says so.
+- **Trigger:** the mean L stays ≥ 0.9 **and** the gate-level clear rate `clearTop` (non-review episodes at L ≥ 0.95) stays ≥ the gate, over the last **100** stats windows (D-031, build B; 100 since D-032; `clearTop` is pooled over those windows and all games). The run report says so.
 - **Gate:** CLUSTER runs `-Eval -Stage=Sn -StartDifficulty=1`: 200 fixed-seed episodes, no training, mean actions.
 - **Pass:** clear rate ≥ 70% (a per-stage setting). The snapshot is then published as `run-<id>` and the next stage starts from it at L = 0.
 
