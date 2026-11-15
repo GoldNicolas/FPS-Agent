@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Guidance for **every** Claude Code session in this repo. Two sessions work in parallel, one on Windows and one on the Cradle cluster, and **this GitHub repo is the only channel between them**. `README.md` is the design and runbook; `docs/STATUS.md` is the live mailbox.
+Guidance for **every** Claude Code session in this repo. Two sessions work in parallel, one on Windows and one on the Cradle cluster, and **this GitHub repo is the only channel between them**. `docs/handbook.md` is the design and runbook (it was `README.md` until D-034; "README → *section*" in older docs means the handbook section of the same name), `README.md` is the showcase front page, and `docs/STATUS.md` is the live mailbox.
 
 ## What this project is
 A headless RL training environment in **UE 5.7**: "beans with guns" agents with Valorant-like mechanics, trained with **Learning Agents (PPO)** on the **UTRGV Cradle** Slurm cluster, then shown off in a **deathmatch field test**. The long-term goal is an in-game bot mechanic.
@@ -16,10 +16,10 @@ If unsure, run `uname -a` / `hostname`. Say which role you are taking in your fi
 ### Start of every session
 1. `git pull --rebase`
 2. Read `docs/STATUS.md`: the requests addressed to your role, the latest build, and the runs.
-3. Read the docs relevant to your task (README section, `docs/cradle.md`, spike or run reports).
+3. Read the docs relevant to your task (handbook section, `docs/cradle.md`, spike or run reports).
 
 ### After every advancement (a finished step, result or fix)
-1. Update the docs: your rows in `docs/STATUS.md`, plus the spike, run or build report you produced. Add a `docs/decisions.md` entry if a design decision changed, and update `README.md` if the design or workflow changed.
+1. Update the docs: your rows in `docs/STATUS.md`, plus the spike, run or build report you produced. Add a `docs/decisions.md` entry if a design decision changed, and update `docs/handbook.md` if the design or workflow changed (and the `README.md` front page when results or the stage status change).
 2. Commit with the role prefix: `[local] ...` or `[cluster] ...`. Keep commits small and focused.
 3. `git pull --rebase`, then `git push`. **Never force-push.** On a conflict in `STATUS.md`, keep both sides' entries.
 
@@ -32,12 +32,13 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 | `cluster/slurm/`, `cluster/env/`, `cluster/scripts/`, `cluster/sweeps/`, `docs/cradle.md`, `docs/runs/` | CLUSTER |
 | `docs/spikes/<X>.md` | Whichever side ran that spike |
 | `docs/STATUS.md` | Shared: only your own rows, and the Status/Answer cells of requests addressed to you |
-| `README.md`, `CLAUDE.md`, `docs/decisions.md` | Shared: small edits; record design changes in `decisions.md` |
+| `README.md`, `docs/handbook.md`, `CLAUDE.md`, `docs/decisions.md` | Shared: small edits; record design changes in `decisions.md` |
 
 ### What travels how
 | Thing | Channel |
 |---|---|
 | Code, scripts, configs, markdown, small CSVs (< 1 MB) | git |
+| Showcase media for the README (GIF, MP4, PNG; at most about 5 MB each) | git, `docs/media/` (D-034) |
 | Linux game builds | GitHub Release `build-<short-sha>` (see `docs/builds.md`) |
 | Trained snapshots for LOCAL to watch or evaluate | GitHub Release `run-<run-id>` (see `docs/runs/README.md`) |
 | Full snapshots, logs, TensorBoard events | Stay on Cradle (`~/beanRant/runs/`, D-021). Never committed. |
@@ -74,7 +75,7 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 - Module folders: `Source/FPSAgent/{Character,Weapons,Bots,Arena,Learning,Eval}`.
 - UE units are centimetres. Document unit conversions where config values come from real-world m/s.
 - **Determinism:** all randomness (spawns, bot behavior, recoil, spread, map variant) goes through one per-episode seeded RNG, derived from the `-Seed=` command-line argument plus the arena index plus the episode count.
-- Our command-line arguments are `-Stage=`, `-Seed=`, `-Arenas=` and so on. Parse them in one place in C++, log the parsed values at startup, and document every one in README → Cluster, because the CLUSTER side depends on them.
+- Our command-line arguments are `-Stage=`, `-Seed=`, `-Arenas=` and so on. Parse them in one place in C++, log the parsed values at startup, and document every one in the handbook → Cluster, because the CLUSTER side depends on them.
 - Keep the RL layer (`Learning/`) behind a thin interface over the gameplay code, so the trainer stack could be swapped (e.g. to AMD Schola) without touching gameplay.
 - Reward terms and weights live in one config struct, and each term is logged separately (to TensorBoard or MLflow) so sweeps can be compared.
 - Accuracy and headshot % are **metrics, not rewards**.
@@ -82,12 +83,12 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 
 ### Unreal-MCP (editor-only)
 - Setup: plugin 0.30.0, **local mode** with no cloud account (`Game/FPSAgent/.env`). The `unreal-mcp` server is in the repo-root `.mcp.json` (`http://localhost:24268/mcp/p/d2699ae8`). It is only reachable while the editor is open; check with `unreal-mcp-cli status -p Game/FPSAgent`.
-- **The plugin is not in git** (decision D-010). On a fresh clone, reinstall it before opening the project (README → Windows dev setup).
+- **The plugin is not in git** (decision D-010). On a fresh clone, reinstall it before opening the project (handbook → Windows dev setup).
 - Never switch to Cloud mode or sign in to ai-game.dev without the user's OK. Never commit `.env`.
 - Keep `"TargetDenyList": ["Game","Client","Server"]` on the UnrealMCP entry in `FPSAgent.uproject`. Never add `UnrealMcp*` modules to `FPSAgent.Build.cs`; that would override the deny list and pull the plugin into the Linux builds.
 - **C++:** edit files under `Source/`, then build with `powershell -File tools/build.ps1` (editor closed) and fix the reported errors before moving on. Includes are relative to the module root (`"Common/FPSAgentSettings.h"`). In UE 5.7, `FVector`, `FVector2D` and `FRotator` are double: cast to float in `TestEqual` calls. Never give a test a name that is a dot-prefix of another test's name (`X.Stats` next to `X.Stats.ClearTop`): UE turns `X.Stats` into a group and silently skips it. After adding tests, check that the suite count rose by exactly that many.
 - **Levels are data, built at runtime** (D-011). Never hand-place level actors or author `.umap` files.
-  - Specs live in `Game/FPSAgent/Content/MapSpecs/` (format v1, README → Maps).
+  - Specs live in `Game/FPSAgent/Content/MapSpecs/` (format v1, handbook → Maps).
   - `map01.json` is generated from `tools/mapgen/maps/map01.py`, so edit the script, not the JSON. `gen_*.json` and `pool.json` come from `python -m mapgen generate`.
   - Every spec must pass `python -m mapgen validate` before it is committed.
   - Python always runs as `conda run -n fps-agent ...` from `tools/mapgen`. Calling `python.exe` directly crashes because of a DLL conflict on PATH.
@@ -136,4 +137,4 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 
 ## Repo hygiene
 - Git LFS handles `*.uasset` and `*.umap` (`.gitattributes`). Never commit `Binaries/`, `Intermediate/`, `Saved/`, `DerivedDataCache/`, packaged builds, the UnrealMCP plugin folder, or run outputs (`.gitignore`).
-- `PLAN.md` holds the user's original notes. Leave it alone unless asked; `README.md` supersedes it where they differ (e.g. original maps instead of 1:1 copies).
+- `PLAN.md` holds the user's original notes. Leave it alone unless asked; the handbook supersedes it where they differ (e.g. original maps instead of 1:1 copies).
