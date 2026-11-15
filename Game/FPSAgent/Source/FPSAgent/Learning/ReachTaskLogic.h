@@ -6,7 +6,7 @@
 /** Pure math for the Spike A toy task (no world, no Learning Agents): unit-tested in Tests/ReachTaskTests.cpp. */
 namespace FPSReach
 {
-	/** Per-episode RNG seed from -Seed, the arena index and the episode count (CLAUDE.md determinism rule). */
+	/** Per-episode RNG seed from -Seed, the arena index and the episode count (the project's determinism rule). */
 	FPSAGENT_API int32 EpisodeSeed(int32 BaseSeed, int32 ArenaIndex, int32 EpisodeCount);
 
 	/** Arena centers on a square grid (ceil(sqrt(N)) wide), SpacingCm apart. Row -> +X, column -> +Y. */

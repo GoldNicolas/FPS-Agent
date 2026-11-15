@@ -6,7 +6,6 @@
 !/docs/media/
 !/docs/maps/
 /.mcp.json
-/.claude/
 /.superpowers/
 /models/
 eval.json
