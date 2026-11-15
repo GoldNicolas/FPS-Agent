@@ -1,0 +1,13 @@
+
+# ---- Showcase branch: only the project's main components are published here ----
+*.md
+!/README.md
+/docs/*
+!/docs/media/
+!/docs/maps/
+/.mcp.json
+/.claude/
+/.superpowers/
+/models/
+eval.json
+eval.log
