@@ -14,7 +14,7 @@ A headless RL training environment in **UE 5.7**: "beans with guns" agents with 
 If unsure, run `uname -a` / `hostname`. Say which role you are taking in your first reply.
 
 ### Start of every session
-1. `git pull --rebase`
+1. `git switch develop` (never work on `main`; see *Branches*), then `git pull --rebase`
 2. Read `docs/STATUS.md`: the requests addressed to your role, the latest build, and the runs.
 3. Read the docs relevant to your task (handbook section, `docs/cradle.md`, spike or run reports).
 
@@ -44,6 +44,14 @@ Ask the user before pushing anything unusual (history rewrites, deleting the oth
 | Full snapshots, logs, TensorBoard events | Stay on Cradle (`~/beanRant/runs/`, D-021). Never committed. |
 
 **Run IDs (D-033):** `<stage>-<mobility>-<YYYYMMDD>-<jobid>`, with mobility `static`, `walk` or `full`. It MUST match the run's `-Set`: `walk` = `Combat.Abilities.bCrouch=false;Combat.Abilities.bJump=false`, and `full` = neither. Check it against the `mobility=` field of the `Combat: ready` log line. The release is `run-<run-id>`. The `walk` line is the game's line.
+
+### Branches (D-035)
+- **`develop` is the working branch.** Both roles pull, commit and push only there, and everything in this file applies to it.
+- **`main` is a generated showcase.** Never commit to it, never pull it into `develop`, and never base work on it.
+  - LOCAL publishes it from a clean, pushed `develop` with `powershell -File tools/publish_showcase.ps1 -Push`.
+  - The showcase keeps the code, tools, cluster scripts, `docs/media/` and `docs/maps/`. It drops every other markdown (its README is `tools/showcase/README.md`), the rest of `docs/`, `.mcp.json` and the publishing tools.
+  - Showcase commits use a neutral message with no co-author trailer (user, 2026-11-14).
+- `main` was rewritten once, on 2026-11-14 with the user's OK, into a single fresh commit; the full history lives on `develop`. Publishing after that is a normal fast-forward push.
 
 ## Hard rules (do not break without the user's explicit OK)
 1. **No computer vision.** Never add camera, render-target or pixel observations. Agents perceive the world through ray casts and line-of-sight checks only.
