@@ -1,0 +1,11 @@
+# Unreal Engine generated
+Binaries/
+Intermediate/
+Saved/
+DerivedDataCache/
+# Cooker by-product of BuildCookRun (file-open-order logs). Keep the rest of Build/ trackable (icons, platform config).
+Build/*/FileOpenOrder/
+.vs/
+*.sln
+# Unreal-MCP local secrets — never commit
+.env

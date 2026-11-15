@@ -1,0 +1,85 @@
+#include "Misc/AutomationTest.h"
+#include "Dom/JsonObject.h"
+#include "Learning/CombatStats.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+
+#if WITH_DEV_AUTOMATION_TESTS
+
+using namespace FPSCombatStats;
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatStatsTest, "FPSAgent.Combat.Stats",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatStatsTest::RunTest(const FString& Parameters)
+{
+	FEpisodeRecord A;
+	A.bCleared = true; A.Return = 3.f; A.Shots = 10; A.Hits = 4; A.Headshots = 1; A.Kills = 2; A.Bots = 2; A.Seconds = 8.f;
+	A.Terms[static_cast<int32>(FPSCombatReward::ETerm::Kill)] = 2.f;
+	FEpisodeRecord B;
+	B.bDied = true; B.Return = -1.f; B.Shots = 5; B.Hits = 1; B.Seconds = 4.f;
+	FWindow W;
+	W.Add(A);
+	W.Add(B);
+	TestEqual(TEXT("episodes"), W.Episodes, 2);
+	TestEqual(TEXT("clear rate"), static_cast<float>(W.ClearRate()), 0.5f, 1e-6f);
+	TestEqual(TEXT("death rate"), static_cast<float>(W.DeathRate()), 0.5f, 1e-6f);
+	TestEqual(TEXT("avg return"), static_cast<float>(W.AvgReturn()), 1.f, 1e-6f);
+	TestEqual(TEXT("accuracy = hits / shots"), static_cast<float>(W.Accuracy()), 5.f / 15.f, 1e-6f);
+	TestEqual(TEXT("headshot rate = headshots / hits"), static_cast<float>(W.HeadshotRate()), 1.f / 5.f, 1e-6f);
+	TestEqual(TEXT("clear time counts cleared episodes only"), static_cast<float>(W.AvgClearSeconds()), 8.f, 1e-6f);
+	TestEqual(TEXT("avg kill term"), static_cast<float>(W.AvgTerm(static_cast<int32>(FPSCombatReward::ETerm::Kill))), 1.f, 1e-6f);
+
+	const FLevelSummary L{ 0.3f, 0.1f, 0.5f };
+	TArray<FString> Header, Row;
+	CsvHeader().ParseIntoArray(Header, TEXT(","), false);
+	CsvRow(W, 12.0, L, 900.0).ParseIntoArray(Row, TEXT(","), false);
+	TestEqual(TEXT("csv columns match"), Row.Num(), Header.Num());
+	TestTrue(TEXT("csv has every term"), CsvHeader().Contains(TEXT("term_AimHelper")));
+	TestTrue(TEXT("log line prefix"), LogLine(W, 12.0, L, 900.0).StartsWith(TEXT("CombatStats: ")));
+
+	TSharedPtr<FJsonObject> Obj;
+	const TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(EvalJson(W, TEXT("S0"), 1.f, 7, TEXT("/snap"), 0.7f));
+	TestTrue(TEXT("eval json parses"), FJsonSerializer::Deserialize(Reader, Obj) && Obj.IsValid());
+	if (Obj.IsValid())
+	{
+		TestEqual(TEXT("eval episodes"), static_cast<int32>(Obj->GetNumberField(TEXT("episodes"))), 2);
+		TestEqual(TEXT("eval clear rate"), static_cast<float>(Obj->GetNumberField(TEXT("clearRate"))), 0.5f, 1e-6f);
+		TestFalse(TEXT("0.5 < 0.7 gate: not passed"), Obj->GetBoolField(TEXT("passed")));
+		TestEqual(TEXT("stage"), Obj->GetStringField(TEXT("stage")), FString(TEXT("S0")));
+		TestTrue(TEXT("terms object"), Obj->HasField(TEXT("terms")));
+	}
+	W.Reset();
+	TestEqual(TEXT("reset"), W.Episodes, 0);
+	return true;
+}
+
+IMPLEMENT_SIMPLE_AUTOMATION_TEST(FFPSCombatStatsTopTest, "FPSAgent.Combat.StatsClearTop",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+bool FFPSCombatStatsTopTest::RunTest(const FString& Parameters)
+{
+	auto Rec = [](float Level, bool bCleared, bool bReview, float BotSpeed = 0.f) { FEpisodeRecord R; R.Level = Level; R.bCleared = bCleared; R.bReview = bReview; R.BotSpeedCmS = BotSpeed; return R; };
+	FWindow W;
+	W.TopLevel = 0.95f;
+	W.Add(Rec(1.f, true, false, 100.f)); // counts, cleared
+	W.Add(Rec(0.96f, false, false, 300.f)); // counts, not cleared
+	W.Add(Rec(0.5f, true, false));   // below the gate level
+	W.Add(Rec(1.f, true, true));     // review episode: never counts
+	TestEqual(TEXT("gate-level episodes"), W.TopEpisodes, 2);
+	TestEqual(TEXT("bot speed averages over the episodes (100 and 300 and two zeros)"), static_cast<float>(W.AvgBotSpeed()), 100.f, 1e-3f);
+	TestEqual(TEXT("gate-level clear rate"), static_cast<float>(W.ClearRateTop()), 0.5f, 1e-6f);
+	TestTrue(TEXT("log line has clearTop"), LogLine(W, 1.0, FLevelSummary(), 1.0).Contains(TEXT("clearTop=50.0%(n=2)")));
+	TArray<FString> Header, Row;
+	CsvHeader().ParseIntoArray(Header, TEXT(","), false);
+	CsvRow(W, 1.0, FLevelSummary(), 1.0).ParseIntoArray(Row, TEXT(","), false);
+	TestEqual(TEXT("csv columns still match"), Row.Num(), Header.Num());
+	TestEqual(TEXT("new columns are last"), Header.Last(), FString(TEXT("botSpeed")));
+	TestEqual(TEXT("...after episodesTop"), Header[Header.Num() - 2], FString(TEXT("episodesTop")));
+	TestTrue(TEXT("log line has botSpeed"), LogLine(W, 1.0, FLevelSummary(), 1.0).Contains(TEXT("botSpeed=")));
+	W.TopLevel = 0.9f;
+	W.Reset();
+	TestEqual(TEXT("reset clears the counts"), W.TopEpisodes, 0);
+	TestEqual(TEXT("reset keeps the gate level"), W.TopLevel, 0.9f);
+	return true;
+}
+
+#endif

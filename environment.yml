@@ -1,0 +1,13 @@
+# Local (Windows) tooling env: map generator/validator, tests, analysis.
+# conda-forge only (Anaconda's default channel has license terms that may not cover university research).
+# Create:  conda env create -f environment.yml      (channels below already exclude Anaconda defaults)
+# Update:  conda env update -f environment.yml --prune
+name: fps-agent
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.11
+  - numpy
+  - matplotlib
+  - pytest

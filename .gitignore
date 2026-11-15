@@ -1,0 +1,46 @@
+# ---- Build artifacts: shipped via GitHub Releases, never committed ----
+/Builds/
+*.tar
+*.tar.gz
+*.tgz
+*.tar.zst
+*.zip
+
+# ---- Unreal-MCP plugin: ~580 MB of bridge binaries, editor-only, reinstalled with unreal-mcp-cli ----
+/Game/FPSAgent/Plugins/UnrealMCP/
+/Game/FPSAgent/.mcp.json
+/Game/FPSAgent/.ai-game-dev/session.json
+
+# ---- Secrets / machine-local config ----
+.env
+**/.env
+
+# ---- Training outputs: stay on Cradle (Weka); only summaries go in docs/runs/ ----
+/runs/
+events.out.tfevents.*
+*.tfevents.*
+mlruns/
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.venv/
+*.egg-info/
+
+# ---- OS / editors ----
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---- Showcase branch: only the project's main components are published here ----
+*.md
+!/README.md
+/docs/*
+!/docs/media/
+!/docs/maps/
+/.mcp.json
+/.superpowers/
+/models/
+eval.json
+eval.log
